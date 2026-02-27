@@ -1,10 +1,1 @@
-﻿[
-  {
-    "id": "rule_1",
-    "description_contains": "NETFLIX",
-    "amount_min": null,
-    "amount_max": null,
-    "is_recurring": null,
-    "set_category": "Assinaturas"
-  }
-]
+[]

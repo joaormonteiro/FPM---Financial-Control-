@@ -1,9 +1,11 @@
 ﻿import sqlite3
+import uuid
 
 import pandas as pd
 import streamlit as st
 
-from db import init_db, update_transaction_manual
+from ai.custom_rule_engine import add_custom_rule, delete_custom_rule, load_custom_rules
+from db import init_db, set_transaction_recurring, update_transaction_manual
 from models import ALLOWED_CATEGORIES, ALLOWED_PAYERS
 
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
@@ -74,6 +76,54 @@ col3.metric("Total recebido", f"R$ {total_received:.2f}".replace(".", ","))
 
 st.markdown("---")
 
+st.subheader("Gerenciar Regras")
+
+rules = load_custom_rules()
+if rules:
+    st.dataframe(pd.DataFrame(rules), use_container_width=True)
+else:
+    st.info("Nenhuma regra personalizada cadastrada.")
+
+with st.form("custom_rule_create_form"):
+    description_contains = st.text_input("Descricao contem")
+    amount_min_text = st.text_input("Valor minimo (opcional)")
+    amount_max_text = st.text_input("Valor maximo (opcional)")
+    recurring_option = st.selectbox("Recorrente", options=["Qualquer", "Sim", "Nao"])
+    set_category = st.text_input("Categoria de destino")
+    create_rule_submitted = st.form_submit_button("Criar regra")
+
+if create_rule_submitted:
+    amount_min = float(amount_min_text) if amount_min_text.strip() else None
+    amount_max = float(amount_max_text) if amount_max_text.strip() else None
+    is_recurring_value = None
+    if recurring_option == "Sim":
+        is_recurring_value = True
+    elif recurring_option == "Nao":
+        is_recurring_value = False
+
+    add_custom_rule(
+        {
+            "id": f"rule_{uuid.uuid4().hex[:8]}",
+            "description_contains": description_contains or None,
+            "amount_min": amount_min,
+            "amount_max": amount_max,
+            "is_recurring": is_recurring_value,
+            "set_category": set_category or None,
+        }
+    )
+    st.success("Regra criada com sucesso.")
+    st.rerun()
+
+if rules:
+    rule_ids = [r.get("id") for r in rules if r.get("id")]
+    selected_rule_id = st.selectbox("Regra para excluir", options=rule_ids)
+    if st.button("Excluir regra"):
+        delete_custom_rule(selected_rule_id)
+        st.success("Regra excluida com sucesso.")
+        st.rerun()
+
+st.markdown("---")
+
 st.subheader("Gastos por categoria")
 
 if "category_ai" in filtered_df.columns:
@@ -125,6 +175,18 @@ if "id" in filtered_df.columns and not filtered_df.empty:
                 payer=new_payer or None,
             )
             st.success("Classificacao manual aplicada.")
+            st.rerun()
+
+        recurrence_group_name = st.text_input(
+            "Grupo de recorrencia",
+            value=str(selected_row.get("recurrence_group_id") or ""),
+        )
+        if st.button("Marcar como recorrente"):
+            set_transaction_recurring(
+                transaction_id=int(selected_id),
+                group_name=recurrence_group_name.strip() or f"manual_{selected_id}",
+            )
+            st.success("Transacao marcada como recorrente.")
             st.rerun()
 
 st.markdown("---")
@@ -208,4 +270,3 @@ styler = styler.set_table_styles(
 )
 
 st.dataframe(styler, use_container_width=True, height=600)
-

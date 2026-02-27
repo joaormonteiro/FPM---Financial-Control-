@@ -325,6 +325,8 @@ def reprocess_all_with_history():
 
 
 def set_transaction_recurring(transaction_id: int, group_name: str) -> None:
+    from ai.custom_rule_engine import apply_custom_rule
+
     conn = connect()
     c = conn.cursor()
 
@@ -338,6 +340,43 @@ def set_transaction_recurring(transaction_id: int, group_name: str) -> None:
         """,
         (group_name, transaction_id),
     )
+
+    c.execute(
+        """
+        SELECT cleaned_description, raw_description, amount
+        FROM transactions
+        WHERE id = ?
+        """,
+        (transaction_id,),
+    )
+    row = c.fetchone()
+    if row:
+        cleaned_description, raw_description, amount = row
+        custom_result = apply_custom_rule(
+            description=(cleaned_description or raw_description or ""),
+            amount=float(amount or 0.0),
+            is_recurring=True,
+        )
+        if custom_result is not None:
+            custom_category, custom_confidence = custom_result
+            c.execute(
+                """
+                UPDATE transactions
+                SET category = ?,
+                    category_ai = ?,
+                    confidence = ?,
+                    ai_confidence = ?,
+                    classification_source = 'rule'
+                WHERE id = ?
+                """,
+                (
+                    _normalize_category(custom_category),
+                    _normalize_category(custom_category),
+                    _normalize_confidence(float(custom_confidence), "rule"),
+                    _normalize_confidence(float(custom_confidence), "rule"),
+                    transaction_id,
+                ),
+            )
 
     conn.commit()
     conn.close()
