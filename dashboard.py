@@ -208,3 +208,4 @@ styler = styler.set_table_styles(
 )
 
 st.dataframe(styler, use_container_width=True, height=600)
+

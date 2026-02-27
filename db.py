@@ -102,7 +102,9 @@ def init_db():
             raw_description TEXT NOT NULL DEFAULT '',
             cleaned_description TEXT,
             classification_source TEXT NOT NULL DEFAULT 'heuristic',
-            is_recurring INTEGER NOT NULL DEFAULT 0
+            is_recurring INTEGER NOT NULL DEFAULT 0,
+            recurrence_group_id TEXT,
+            recurrence_confidence REAL
         )
         """
     )
@@ -126,6 +128,8 @@ def init_db():
         "cleaned_description": "TEXT",
         "classification_source": "TEXT NOT NULL DEFAULT 'heuristic'",
         "is_recurring": "INTEGER NOT NULL DEFAULT 0",
+        "recurrence_group_id": "TEXT",
+        "recurrence_confidence": "REAL",
     }
 
     for column, column_type in required_columns.items():
@@ -139,6 +143,8 @@ def init_db():
             cleaned_description = COALESCE(cleaned_description, description_ai, description),
             classification_source = COALESCE(NULLIF(classification_source, ''), 'heuristic'),
             is_recurring = COALESCE(is_recurring, 0),
+            recurrence_group_id = COALESCE(recurrence_group_id, NULL),
+            recurrence_confidence = COALESCE(recurrence_confidence, NULL),
             confidence = COALESCE(confidence, ai_confidence, 0.0)
         """
     )
@@ -178,8 +184,9 @@ def insert_transaction(t: Transaction):
         INSERT INTO transactions
         (date, description, amount, account, type, category, payer, source_file,
          imported_at, description_ai, category_ai, ai_confidence, ai_updated_at,
-         confidence, raw_description, cleaned_description, classification_source, is_recurring)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         confidence, raw_description, cleaned_description, classification_source, is_recurring,
+         recurrence_group_id, recurrence_confidence)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             t.date.isoformat(),
@@ -200,6 +207,8 @@ def insert_transaction(t: Transaction):
             cleaned_description,
             classification_source,
             1 if t.is_recurring else 0,
+            None,
+            None,
         ),
     )
 
@@ -313,3 +322,22 @@ def reprocess_all_with_history():
     conn.commit()
     conn.close()
     return updated
+
+
+def set_transaction_recurring(transaction_id: int, group_name: str) -> None:
+    conn = connect()
+    c = conn.cursor()
+
+    c.execute(
+        """
+        UPDATE transactions
+        SET is_recurring = 1,
+            recurrence_group_id = ?,
+            recurrence_confidence = 1.0
+        WHERE id = ?
+        """,
+        (group_name, transaction_id),
+    )
+
+    conn.commit()
+    conn.close()

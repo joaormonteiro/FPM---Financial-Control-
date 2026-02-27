@@ -1,8 +1,9 @@
 from pathlib import Path
 import sys
 
+from ai.recurrence_engine import detect_recurring_transactions
 from classifier import classify
-from db import init_db, insert_transaction
+from db import connect, init_db, insert_transaction
 from importers.inter_csv import parse_inter_csv
 
 
@@ -32,6 +33,10 @@ def main():
     for t in transactions:
         classify(t)
         insert_transaction(t)
+
+    conn = connect()
+    detect_recurring_transactions(conn)
+    conn.close()
 
     print(f"{len(transactions)} transacoes importadas com sucesso.")
 

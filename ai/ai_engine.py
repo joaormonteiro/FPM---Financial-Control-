@@ -1,6 +1,7 @@
 ﻿import re
 import unicodedata
 
+from .custom_rule_engine import apply_custom_rule
 from .history_classifier import HistoryBasedClassifier
 from .rule_engine import apply_rules
 
@@ -112,6 +113,21 @@ def enhance_transaction(raw_description: str, amount: float):
             _normalize_category(rule_category),
             (rule_payer or "Joao").strip(),
             float(rule_conf),
+            "rule",
+        )
+
+    custom_rule_result = apply_custom_rule(
+        cleaned_hint or raw_description,
+        amount,
+        is_recurring=False,
+    )
+    if custom_rule_result is not None:
+        custom_category, custom_confidence = custom_rule_result
+        return (
+            cleaned_hint or raw_description,
+            _normalize_category(custom_category),
+            "Joao",
+            float(custom_confidence),
             "rule",
         )
 
