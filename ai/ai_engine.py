@@ -1,6 +1,7 @@
 ﻿import re
 import unicodedata
 
+from .history_classifier import HistoryBasedClassifier
 from .rule_engine import apply_rules
 
 ENABLE_AI = False
@@ -15,6 +16,7 @@ ALLOWED_CATEGORIES = {
 
 PIX_RE = re.compile(r"^Pix\s+(enviado|recebido):\s*\"?(.+?)\"?$", re.IGNORECASE)
 COMPRA_RE = re.compile(r"^Compra no debito:\s*\"?(.+?)\"?$", re.IGNORECASE)
+_HISTORY_CLASSIFIER: HistoryBasedClassifier | None = None
 
 
 def _strip_accents(text: str) -> str:
@@ -87,6 +89,14 @@ def _heuristic_category(text: str) -> str:
     return "Outros"
 
 
+def _get_history_classifier() -> HistoryBasedClassifier:
+    global _HISTORY_CLASSIFIER
+    if _HISTORY_CLASSIFIER is None:
+        _HISTORY_CLASSIFIER = HistoryBasedClassifier("data/finance.db")
+        _HISTORY_CLASSIFIER.build_index()
+    return _HISTORY_CLASSIFIER
+
+
 def enhance_transaction(raw_description: str, amount: float):
     """
     Enriquecimento offline de transacao financeira.
@@ -103,6 +113,17 @@ def enhance_transaction(raw_description: str, amount: float):
             (rule_payer or "Joao").strip(),
             float(rule_conf),
             "rule",
+        )
+
+    history_prediction = _get_history_classifier().predict(cleaned_hint or raw_description)
+    if history_prediction is not None:
+        category, payer, confidence = history_prediction
+        return (
+            cleaned_hint or raw_description,
+            _normalize_category(category),
+            (payer or "Joao").strip(),
+            float(confidence),
+            "history",
         )
 
     category = _heuristic_category(raw_description)

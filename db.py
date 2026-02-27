@@ -33,8 +33,9 @@ def _add_column_if_missing(
 
 
 def _normalize_source(source: str | None) -> str:
+    allowed_sources = set(ALLOWED_CLASSIFICATION_SOURCES) | {"history"}
     normalized = (source or "heuristic").strip().lower()
-    if normalized not in ALLOWED_CLASSIFICATION_SOURCES:
+    if normalized not in allowed_sources:
         return "heuristic"
     return normalized
 
@@ -229,3 +230,86 @@ def update_transaction_manual(tx_id: int, category: str, payer: str | None):
 
     conn.commit()
     conn.close()
+
+
+def reprocess_all_with_history():
+    from ai.history_classifier import HistoryBasedClassifier
+    from ai.rule_engine import apply_rules
+
+    conn = connect()
+    c = conn.cursor()
+
+    c.execute(
+        """
+        SELECT id, raw_description, cleaned_description, description, amount
+        FROM transactions
+        WHERE classification_source != 'manual'
+          AND (
+                classification_source = 'heuristic'
+                OR COALESCE(confidence, 0.0) < 0.6
+              )
+        """
+    )
+    rows = c.fetchall()
+
+    classifier = HistoryBasedClassifier(DB_PATH)
+    classifier.build_index()
+
+    updated = 0
+    for tx_id, raw_description, cleaned_description, description, amount in rows:
+        raw_desc = (raw_description or description or "").strip()
+        if not raw_desc:
+            continue
+
+        clean_desc = (cleaned_description or raw_desc).strip()
+
+        rule_result = apply_rules(raw_desc, float(amount or 0.0))
+        if rule_result is not None:
+            rule_desc, rule_category, rule_payer, rule_conf = rule_result
+            c.execute(
+                """
+                UPDATE transactions
+                SET category = ?,
+                    payer = ?,
+                    confidence = ?,
+                    classification_source = 'rule',
+                    cleaned_description = COALESCE(?, cleaned_description)
+                WHERE id = ?
+                """,
+                (
+                    _normalize_category(rule_category),
+                    _normalize_payer(rule_payer),
+                    _normalize_confidence(float(rule_conf), "rule"),
+                    rule_desc,
+                    tx_id,
+                ),
+            )
+            updated += 1
+            continue
+
+        pred = classifier.predict(clean_desc)
+        if pred is None:
+            continue
+
+        pred_category, pred_payer, pred_confidence = pred
+        c.execute(
+            """
+            UPDATE transactions
+            SET category = ?,
+                payer = ?,
+                confidence = ?,
+                classification_source = 'history'
+            WHERE id = ?
+            """,
+            (
+                _normalize_category(pred_category),
+                _normalize_payer(pred_payer),
+                _normalize_confidence(float(pred_confidence), "history"),
+                tx_id,
+            ),
+        )
+        updated += 1
+
+    conn.commit()
+    conn.close()
+    return updated
