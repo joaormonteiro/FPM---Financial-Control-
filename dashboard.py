@@ -1,13 +1,16 @@
 ﻿import sqlite3
 import uuid
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
 from ai.chat_controller import handle_user_question
+from ai.financial_advisor import generate_financial_advice
 from ai.custom_rule_engine import add_custom_rule, delete_custom_rule, load_custom_rules
 from db import init_db, set_transaction_recurring, update_transaction_manual
 from models import ALLOWED_CATEGORIES, ALLOWED_PAYERS
+from services.insight_service import generate_monthly_insights
 
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
 
@@ -77,6 +80,55 @@ with tab_dashboard:
     col1.metric("Total gasto", f"R$ {abs(total_spent):.2f}".replace(".", ","))
     col2.metric("Pago pelos pais", f"R$ {abs(parents):.2f}".replace(".", ","))
     col3.metric("Total recebido", f"R$ {total_received:.2f}".replace(".", ","))
+
+    st.markdown("---")
+
+    st.subheader("Insights Financeiros")
+
+    now = datetime.now()
+    current_month = now.month
+    current_year = now.year
+
+    insight_col_1, insight_col_2 = st.columns(2)
+    with insight_col_1:
+        if st.button("Analisar meu mês"):
+            st.session_state["monthly_insights_data"] = generate_monthly_insights(
+                current_month,
+                current_year,
+            )
+
+    with insight_col_2:
+        if st.button("Onde posso economizar?"):
+            insight_data = st.session_state.get("monthly_insights_data")
+            if insight_data is None:
+                insight_data = generate_monthly_insights(current_month, current_year)
+                st.session_state["monthly_insights_data"] = insight_data
+            st.session_state["monthly_insights_advice"] = generate_financial_advice(
+                insight_data
+            )
+
+    current_insights = st.session_state.get("monthly_insights_data")
+    if current_insights:
+        superfluous = current_insights.get("superfluous", {})
+        growth_alerts = current_insights.get("growth_alerts", [])
+        small_expenses = current_insights.get("small_expenses", [])
+
+        st.write("### Resultado da análise")
+        st.write(
+            f"Gastos supérfluos no mês: R$ {float(superfluous.get('total_superfluous', 0.0)):.2f}"
+        )
+        st.write(
+            f"Percentual sobre despesas do mês: {float(superfluous.get('percentage_of_month', 0.0)):.2f}%"
+        )
+        st.write("Categorias com crescimento acima de 15%:")
+        st.json(growth_alerts)
+        st.write("Pequenas despesas acumuladas (< R$ 40):")
+        st.json(small_expenses)
+
+    current_advice = st.session_state.get("monthly_insights_advice")
+    if current_advice:
+        st.write("### Conselho financeiro")
+        st.write(current_advice)
 
     st.markdown("---")
 
