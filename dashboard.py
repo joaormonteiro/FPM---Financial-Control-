@@ -1,4 +1,6 @@
-﻿import sqlite3
+﻿import os
+import sqlite3
+import tempfile
 import uuid
 from datetime import datetime
 
@@ -6,34 +8,170 @@ import pandas as pd
 import streamlit as st
 
 from ai.chat_controller import handle_user_question
-from ai.financial_advisor import generate_financial_advice
 from ai.custom_rule_engine import add_custom_rule, delete_custom_rule, load_custom_rules
-from db import init_db, set_transaction_recurring, update_transaction_manual
-from models import ALLOWED_CATEGORIES, ALLOWED_PAYERS
+from ai.financial_advisor import generate_financial_advice
+from ai.recurrence_engine import detect_recurring_transactions
+from classifier import classify
+from db import (
+    connect,
+    init_db,
+    insert_transaction,
+    set_transaction_recurring,
+    update_transaction_manual,
+)
+from importers.inter_csv import parse_inter_csv
+from models import ALLOWED_CATEGORIES, ALLOWED_PAYERS, Transaction
 from services.insight_service import generate_monthly_insights
 
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
 
 init_db()
 
-conn = sqlite3.connect("data/finance.db")
-df = pd.read_sql("SELECT * FROM transactions", conn)
-conn.close()
+
+def _load_df() -> pd.DataFrame:
+    conn = sqlite3.connect("data/finance.db")
+    data = pd.read_sql("SELECT * FROM transactions", conn)
+    conn.close()
+    return data
+
+
+def _import_csv_file(uploaded_file) -> tuple[bool, str]:
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+            tmp.write(uploaded_file.getbuffer())
+            temp_path = tmp.name
+
+        transactions = parse_inter_csv(temp_path)
+        for t in transactions:
+            classify(t)
+            insert_transaction(t)
+
+        conn = connect()
+        detect_recurring_transactions(conn)
+        conn.close()
+
+        os.unlink(temp_path)
+        return True, f"Importação concluída: {len(transactions)} transações adicionadas."
+    except Exception as exc:
+        try:
+            if "temp_path" in locals() and os.path.exists(temp_path):
+                os.unlink(temp_path)
+        except Exception:
+            pass
+        return False, f"Erro na importação: {exc}"
+
+
+def _add_manual_transaction(
+    tx_date,
+    description: str,
+    amount: float,
+    category: str,
+    is_recurring: bool,
+) -> tuple[bool, str]:
+    try:
+        if not description.strip():
+            return False, "Descrição é obrigatória."
+
+        ttype = "debit" if float(amount) < 0 else "credit"
+
+        tx = Transaction(
+            date=tx_date,
+            raw_description=description.strip(),
+            description=description.strip(),
+            amount=float(amount),
+            account="Manual",
+            type=ttype,
+            category=category,
+            payer="Joao",
+            source_file="manual_entry",
+            cleaned_description=description.strip(),
+            classification_source="manual",
+            confidence=1.0,
+            is_recurring=1 if is_recurring else 0,
+            ai_confidence=1.0,
+            description_ai=description.strip(),
+            category_ai=category,
+            ai_updated_at=datetime.now().isoformat(),
+        )
+
+        insert_transaction(tx)
+
+        if is_recurring:
+            conn = sqlite3.connect("data/finance.db")
+            cur = conn.cursor()
+            cur.execute("SELECT MAX(id) FROM transactions")
+            row = cur.fetchone()
+            conn.close()
+            if row and row[0] is not None:
+                set_transaction_recurring(int(row[0]), f"manual_{row[0]}")
+
+        return True, "Gasto adicionado com sucesso."
+    except Exception as exc:
+        return False, f"Erro ao adicionar gasto: {exc}"
+
+
+df = _load_df()
 
 st.title("Controle Financeiro")
 
-tab_dashboard, tab_chat = st.tabs(["Dashboard", "Conversar com suas finanças"])
+main_tab, chat_tab = st.tabs(["Painel", "Conversar com suas finanças"])
 
-with tab_dashboard:
+with main_tab:
+    st.header("Importar Extrato")
+    st.write("Envie seu arquivo CSV do Banco Inter para atualizar automaticamente seu controle.")
+
+    uploaded_file = st.file_uploader("Escolha o extrato CSV", type=["csv"])
+    if st.button("Importar Extrato"):
+        if uploaded_file is None:
+            st.warning("Selecione um arquivo CSV para importar.")
+        else:
+            ok, msg = _import_csv_file(uploaded_file)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+    st.markdown("---")
+
+    st.header("Lançamento Manual")
+    if st.button("➕ Adicionar Gasto"):
+        st.session_state["show_manual_form"] = True
+
+    if st.session_state.get("show_manual_form", False):
+        with st.form("manual_expense_form"):
+            form_date = st.date_input("Data", value=datetime.now().date())
+            form_description = st.text_input("Descrição")
+            form_amount = st.number_input("Valor", value=0.0, step=0.01, format="%.2f")
+            form_category = st.selectbox("Categoria", options=ALLOWED_CATEGORIES)
+            form_recurring = st.checkbox("Recorrente")
+            submit_manual = st.form_submit_button("Salvar Gasto")
+
+        if submit_manual:
+            ok, msg = _add_manual_transaction(
+                tx_date=form_date,
+                description=form_description,
+                amount=float(form_amount),
+                category=form_category,
+                is_recurring=form_recurring,
+            )
+            if ok:
+                st.success(msg)
+                st.session_state["show_manual_form"] = False
+                st.rerun()
+            else:
+                st.error(msg)
+
+    st.markdown("---")
+
     if df.empty:
-        st.info("Nenhuma transacao encontrada no banco de dados.")
+        st.info("Nenhuma transação encontrada no banco de dados.")
         st.stop()
 
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.dropna(subset=["date"])
 
     st.sidebar.header("Filtros")
-
     start_date = st.sidebar.date_input("Data inicial", df["date"].min().date())
     end_date = st.sidebar.date_input("Data final", df["date"].max().date())
 
@@ -55,9 +193,9 @@ with tab_dashboard:
         & (df["payer"].isin(payer_filter))
     ]
 
-    st.markdown("---")
+    st.header("Métricas Principais")
 
-    col1, col2, col3 = st.columns(3)
+    m1, m2, m3 = st.columns(3)
 
     raw_desc = filtered_df["description"].fillna("")
     ai_desc = (
@@ -72,18 +210,16 @@ with tab_dashboard:
         )
 
     total_spent = filtered_df[(filtered_df.amount < 0) & (~is_investment)]["amount"].sum()
-    parents = filtered_df[
-        (filtered_df.amount < 0) & (filtered_df.payer == "Pais")
-    ]["amount"].sum()
+    parents = filtered_df[(filtered_df.amount < 0) & (filtered_df.payer == "Pais")]["amount"].sum()
     total_received = filtered_df[filtered_df.amount > 0]["amount"].sum()
 
-    col1.metric("Total gasto", f"R$ {abs(total_spent):.2f}".replace(".", ","))
-    col2.metric("Pago pelos pais", f"R$ {abs(parents):.2f}".replace(".", ","))
-    col3.metric("Total recebido", f"R$ {total_received:.2f}".replace(".", ","))
+    m1.metric("Total Gasto", f"R$ {abs(total_spent):.2f}".replace(".", ","))
+    m2.metric("Pago pelos Pais", f"R$ {abs(parents):.2f}".replace(".", ","))
+    m3.metric("Total Recebido", f"R$ {total_received:.2f}".replace(".", ","))
 
     st.markdown("---")
 
-    st.subheader("Insights Financeiros")
+    st.header("Insights e Conselhos")
 
     now = datetime.now()
     current_month = now.month
@@ -113,10 +249,7 @@ with tab_dashboard:
         growth_alerts = current_insights.get("growth_alerts", [])
         small_expenses = current_insights.get("small_expenses", [])
 
-        st.write("### Resultado da análise")
-        st.write(
-            f"Gastos supérfluos no mês: R$ {float(superfluous.get('total_superfluous', 0.0)):.2f}"
-        )
+        st.write(f"Gastos supérfluos no mês: R$ {float(superfluous.get('total_superfluous', 0.0)):.2f}")
         st.write(
             f"Percentual sobre despesas do mês: {float(superfluous.get('percentage_of_month', 0.0)):.2f}%"
         )
@@ -127,61 +260,12 @@ with tab_dashboard:
 
     current_advice = st.session_state.get("monthly_insights_advice")
     if current_advice:
-        st.write("### Conselho financeiro")
+        st.write("### Conselho Financeiro")
         st.write(current_advice)
 
     st.markdown("---")
 
-    st.subheader("Gerenciar Regras")
-
-    rules = load_custom_rules()
-    if rules:
-        st.dataframe(pd.DataFrame(rules), use_container_width=True)
-    else:
-        st.info("Nenhuma regra personalizada cadastrada.")
-
-    with st.form("custom_rule_create_form"):
-        description_contains = st.text_input("Descricao contem")
-        amount_min_text = st.text_input("Valor minimo (opcional)")
-        amount_max_text = st.text_input("Valor maximo (opcional)")
-        recurring_option = st.selectbox("Recorrente", options=["Qualquer", "Sim", "Nao"])
-        set_category = st.text_input("Categoria de destino")
-        create_rule_submitted = st.form_submit_button("Criar regra")
-
-    if create_rule_submitted:
-        amount_min = float(amount_min_text) if amount_min_text.strip() else None
-        amount_max = float(amount_max_text) if amount_max_text.strip() else None
-        is_recurring_value = None
-        if recurring_option == "Sim":
-            is_recurring_value = True
-        elif recurring_option == "Nao":
-            is_recurring_value = False
-
-        add_custom_rule(
-            {
-                "id": f"rule_{uuid.uuid4().hex[:8]}",
-                "description_contains": description_contains or None,
-                "amount_min": amount_min,
-                "amount_max": amount_max,
-                "is_recurring": is_recurring_value,
-                "set_category": set_category or None,
-            }
-        )
-        st.success("Regra criada com sucesso.")
-        st.rerun()
-
-    if rules:
-        rule_ids = [r.get("id") for r in rules if r.get("id")]
-        selected_rule_id = st.selectbox("Regra para excluir", options=rule_ids)
-        if st.button("Excluir regra"):
-            delete_custom_rule(selected_rule_id)
-            st.success("Regra excluida com sucesso.")
-            st.rerun()
-
-    st.markdown("---")
-
-    st.subheader("Gastos por categoria")
-
+    st.header("Gráficos")
     if "category_ai" in filtered_df.columns:
         cat_key = filtered_df["category_ai"].fillna(filtered_df["category"])
     else:
@@ -195,59 +279,9 @@ with tab_dashboard:
     )
     st.bar_chart(cat, use_container_width=True)
 
-    if "id" in filtered_df.columns and not filtered_df.empty:
-        st.markdown("---")
-        with st.expander("Correcao manual de classificacao"):
-            tx_ids = filtered_df["id"].astype(int).tolist()
-            selected_id = st.selectbox("Transacao", options=tx_ids)
-            selected_row = filtered_df[filtered_df["id"] == selected_id].iloc[0]
-
-            st.caption(str(selected_row.get("raw_description") or selected_row.get("description") or ""))
-
-            current_category = selected_row.get("category")
-            default_category = current_category if current_category in ALLOWED_CATEGORIES else "Outros"
-
-            current_payer = selected_row.get("payer")
-            payer_choices = ["", *ALLOWED_PAYERS]
-            default_payer = current_payer if current_payer in ALLOWED_PAYERS else ""
-
-            with st.form("manual_classification_form"):
-                new_category = st.selectbox(
-                    "Categoria",
-                    options=ALLOWED_CATEGORIES,
-                    index=ALLOWED_CATEGORIES.index(default_category),
-                )
-                new_payer = st.selectbox(
-                    "Pagador",
-                    options=payer_choices,
-                    index=payer_choices.index(default_payer),
-                )
-                submitted = st.form_submit_button("Salvar")
-
-            if submitted:
-                update_transaction_manual(
-                    tx_id=int(selected_id),
-                    category=new_category,
-                    payer=new_payer or None,
-                )
-                st.success("Classificacao manual aplicada.")
-                st.rerun()
-
-            recurrence_group_name = st.text_input(
-                "Grupo de recorrencia",
-                value=str(selected_row.get("recurrence_group_id") or ""),
-            )
-            if st.button("Marcar como recorrente"):
-                set_transaction_recurring(
-                    transaction_id=int(selected_id),
-                    group_name=recurrence_group_name.strip() or f"manual_{selected_id}",
-                )
-                st.success("Transacao marcada como recorrente.")
-                st.rerun()
-
     st.markdown("---")
 
-    st.subheader("Transacoes")
+    st.header("Transações")
 
     table = filtered_df.copy()
 
@@ -321,10 +355,107 @@ with tab_dashboard:
         ]
     )
 
-    st.dataframe(styler, use_container_width=True, height=600)
+    st.dataframe(styler, use_container_width=True, height=500)
 
-with tab_chat:
-    st.subheader("Conversar com suas finanças")
+    st.markdown("---")
+
+    st.header("Regras e Ajustes")
+
+    rules = load_custom_rules()
+    if rules:
+        st.dataframe(pd.DataFrame(rules), use_container_width=True)
+    else:
+        st.info("Nenhuma regra personalizada cadastrada.")
+
+    with st.form("custom_rule_create_form"):
+        description_contains = st.text_input("Descrição contém")
+        amount_min_text = st.text_input("Valor mínimo (opcional)")
+        amount_max_text = st.text_input("Valor máximo (opcional)")
+        recurring_option = st.selectbox("Recorrente", options=["Qualquer", "Sim", "Não"])
+        set_category = st.text_input("Categoria de destino")
+        create_rule_submitted = st.form_submit_button("Criar regra")
+
+    if create_rule_submitted:
+        amount_min = float(amount_min_text) if amount_min_text.strip() else None
+        amount_max = float(amount_max_text) if amount_max_text.strip() else None
+        is_recurring_value = None
+        if recurring_option == "Sim":
+            is_recurring_value = True
+        elif recurring_option == "Não":
+            is_recurring_value = False
+
+        add_custom_rule(
+            {
+                "id": f"rule_{uuid.uuid4().hex[:8]}",
+                "description_contains": description_contains or None,
+                "amount_min": amount_min,
+                "amount_max": amount_max,
+                "is_recurring": is_recurring_value,
+                "set_category": set_category or None,
+            }
+        )
+        st.success("Regra criada com sucesso.")
+        st.rerun()
+
+    if rules:
+        rule_ids = [r.get("id") for r in rules if r.get("id")]
+        selected_rule_id = st.selectbox("Regra para excluir", options=rule_ids)
+        if st.button("Excluir regra"):
+            delete_custom_rule(selected_rule_id)
+            st.success("Regra excluída com sucesso.")
+            st.rerun()
+
+    if "id" in filtered_df.columns and not filtered_df.empty:
+        with st.expander("Correção manual de classificação"):
+            tx_ids = filtered_df["id"].astype(int).tolist()
+            selected_id = st.selectbox("Transação", options=tx_ids)
+            selected_row = filtered_df[filtered_df["id"] == selected_id].iloc[0]
+
+            st.caption(str(selected_row.get("raw_description") or selected_row.get("description") or ""))
+
+            current_category = selected_row.get("category")
+            default_category = current_category if current_category in ALLOWED_CATEGORIES else "Outros"
+
+            current_payer = selected_row.get("payer")
+            payer_choices = ["", *ALLOWED_PAYERS]
+            default_payer = current_payer if current_payer in ALLOWED_PAYERS else ""
+
+            with st.form("manual_classification_form"):
+                new_category = st.selectbox(
+                    "Categoria",
+                    options=ALLOWED_CATEGORIES,
+                    index=ALLOWED_CATEGORIES.index(default_category),
+                )
+                new_payer = st.selectbox(
+                    "Pagador",
+                    options=payer_choices,
+                    index=payer_choices.index(default_payer),
+                )
+                submitted = st.form_submit_button("Salvar")
+
+            if submitted:
+                update_transaction_manual(
+                    tx_id=int(selected_id),
+                    category=new_category,
+                    payer=new_payer or None,
+                )
+                st.success("Classificação manual aplicada.")
+                st.rerun()
+
+            recurrence_group_name = st.text_input(
+                "Grupo de recorrência",
+                value=str(selected_row.get("recurrence_group_id") or ""),
+            )
+            if st.button("Marcar como recorrente"):
+                set_transaction_recurring(
+                    transaction_id=int(selected_id),
+                    group_name=recurrence_group_name.strip() or f"manual_{selected_id}",
+                )
+                st.success("Transação marcada como recorrente.")
+                st.rerun()
+
+with chat_tab:
+    st.header("Chat Financeiro")
     question = st.text_input("Pergunta", key="chat_question")
 
     if st.button("Perguntar", key="chat_ask_button"):
