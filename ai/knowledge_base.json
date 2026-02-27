@@ -1,0 +1,69 @@
+{
+  "people": {
+    "gustavo silva de oliveira": {
+      "aliases": ["gustavo silva", "guti"],
+      "conditional_rules": [
+        {
+          "max_amount": 10,
+          "description": "Carona para a faculdade",
+          "category": "Transporte",
+          "payer": "Pais"
+        },
+        {
+          "description": "Pix pro Guti",
+          "category": "Outros",
+          "payer": "João"
+        }
+      ]
+    },
+
+    "pietro henrique araujo": {
+      "aliases": ["pietro henrique"],
+      "description": "Carona para a faculdade",
+      "category": "Transporte",
+      "payer": "Pais"
+    },
+
+    "lucas jaques de oliveira": {
+      "aliases": ["lucas jaques"],
+      "description": "Carona para a faculdade",
+      "category": "Transporte",
+      "payer": "Pais"
+    },
+
+    "alana cristine dos santos": {
+      "aliases": ["alana cristine"],
+      "description": "Carona para a faculdade",
+      "category": "Transporte",
+      "payer": "Pais"
+    },
+
+    "marina miranda capeli": {
+      "aliases": ["marina miranda"],
+      "description": "Carona para a faculdade",
+      "category": "Transporte",
+      "payer": "Pais"
+    },
+
+    "rubens antunes monteiro": {
+      "aliases": ["rubens antunes"],
+      "description": "Rubens Antunes Monteiro",
+      "category": "Outros",
+      "payer": "João"
+    },
+
+    "lucas gabriel de araujo": {
+      "aliases": ["lucas gabriel"],
+      "description": "Lucas Rezende",
+      "category": "Outros",
+      "payer": "João"
+    },
+
+    "rita de cassia geara guedes": {
+      "aliases": ["rita de cassia"],
+      "description": "Terapia",
+      "category": "Saúde",
+      "payer": "João"
+    }
+  }
+}
