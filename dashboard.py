@@ -1,9 +1,14 @@
-import sqlite3
+﻿import sqlite3
 
 import pandas as pd
 import streamlit as st
 
+from db import init_db, update_transaction_manual
+from models import ALLOWED_CATEGORIES, ALLOWED_PAYERS
+
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
+
+init_db()
 
 conn = sqlite3.connect("data/finance.db")
 df = pd.read_sql("SELECT * FROM transactions", conn)
@@ -52,9 +57,7 @@ ai_desc = (
     else ""
 )
 is_investment = raw_desc.str.contains(r"\bAplicacao\b|\bCDB\b|\bInvest", case=False, na=False)
-if isinstance(ai_desc, str):
-    is_investment = is_investment
-else:
+if not isinstance(ai_desc, str):
     is_investment = is_investment | ai_desc.str.contains(
         r"\bAplicacao\b|\bCDB\b|\bInvest", case=False, na=False
     )
@@ -86,6 +89,44 @@ cat = (
 )
 st.bar_chart(cat, use_container_width=True)
 
+if "id" in filtered_df.columns and not filtered_df.empty:
+    st.markdown("---")
+    with st.expander("Correcao manual de classificacao"):
+        tx_ids = filtered_df["id"].astype(int).tolist()
+        selected_id = st.selectbox("Transacao", options=tx_ids)
+        selected_row = filtered_df[filtered_df["id"] == selected_id].iloc[0]
+
+        st.caption(str(selected_row.get("raw_description") or selected_row.get("description") or ""))
+
+        current_category = selected_row.get("category")
+        default_category = current_category if current_category in ALLOWED_CATEGORIES else "Outros"
+
+        current_payer = selected_row.get("payer")
+        payer_choices = ["", *ALLOWED_PAYERS]
+        default_payer = current_payer if current_payer in ALLOWED_PAYERS else ""
+
+        with st.form("manual_classification_form"):
+            new_category = st.selectbox(
+                "Categoria",
+                options=ALLOWED_CATEGORIES,
+                index=ALLOWED_CATEGORIES.index(default_category),
+            )
+            new_payer = st.selectbox(
+                "Pagador",
+                options=payer_choices,
+                index=payer_choices.index(default_payer),
+            )
+            submitted = st.form_submit_button("Salvar")
+
+        if submitted:
+            update_transaction_manual(
+                tx_id=int(selected_id),
+                category=new_category,
+                payer=new_payer or None,
+            )
+            st.success("Classificacao manual aplicada.")
+            st.rerun()
+
 st.markdown("---")
 
 st.subheader("Transacoes")
@@ -110,7 +151,7 @@ table["Tipo"] = (
 table["Quem pagou"] = (
     table["payer"]
     .fillna("Desconhecido")
-    .replace({"Joao": "João"})
+    .replace({"Joao": "Joao"})
 )
 
 if "category_ai" in table.columns:

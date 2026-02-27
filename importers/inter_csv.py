@@ -77,7 +77,7 @@ def parse_inter_csv(path: str):
 
         ttype = "debit" if amount < 0 else "credit"
 
-        description, category, payer, confidence = enhance_transaction(
+        cleaned_description, category, payer, confidence, classification_source = enhance_transaction(
             raw_description,
             amount,
         )
@@ -92,8 +92,12 @@ def parse_inter_csv(path: str):
             category=category,
             payer=payer,
             source_file=path,
+            cleaned_description=cleaned_description,
+            classification_source=classification_source,
+            confidence=confidence,
+            is_recurring=0,
             ai_confidence=confidence,
-            description_ai=description,
+            description_ai=cleaned_description,
             category_ai=category,
             ai_updated_at=datetime.now().isoformat(),
         )

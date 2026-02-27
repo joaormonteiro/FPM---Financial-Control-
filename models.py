@@ -1,11 +1,27 @@
-from dataclasses import dataclass
+﻿from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
 
+ALLOWED_CLASSIFICATION_SOURCES = {"manual", "rule", "heuristic"}
+
+ALLOWED_CATEGORIES = [
+    "Transporte",
+    "Alimentação",
+    "Saúde",
+    "Lazer",
+    "Outros",
+]
+
+ALLOWED_PAYERS = [
+    "Joao",
+    "Pais",
+]
+
+
 @dataclass
 class Transaction:
-    # Campos obrigatórios (sempre primeiro)
+    # Campos obrigatorios (sempre primeiro)
     date: date
     raw_description: str
     description: str
@@ -18,7 +34,13 @@ class Transaction:
     payer: Optional[str] = None
     source_file: Optional[str] = None
 
-    # Campos opcionais com default (deve vir por último)
+    # Consolidacao Fase 2
+    cleaned_description: Optional[str] = None
+    classification_source: str = "heuristic"
+    confidence: Optional[float] = None
+    is_recurring: int = 0
+
+    # Campos opcionais com default (deve vir por ultimo)
     id: Optional[int] = None
     imported_at: Optional[str] = None
     description_ai: Optional[str] = None

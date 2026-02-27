@@ -1,7 +1,12 @@
 ﻿import sqlite3
 from datetime import datetime
 
-from models import Transaction
+from models import (
+    ALLOWED_CATEGORIES,
+    ALLOWED_CLASSIFICATION_SOURCES,
+    ALLOWED_PAYERS,
+    Transaction,
+)
 
 DB_PATH = "data/finance.db"
 
@@ -27,6 +32,50 @@ def _add_column_if_missing(
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
 
+def _normalize_source(source: str | None) -> str:
+    normalized = (source or "heuristic").strip().lower()
+    if normalized not in ALLOWED_CLASSIFICATION_SOURCES:
+        return "heuristic"
+    return normalized
+
+
+def _normalize_confidence(value: float | None, source: str) -> float:
+    if source == "manual":
+        return 1.0
+
+    if value is None:
+        return 0.0 if source == "heuristic" else 0.0
+
+    conf = float(value)
+    if conf < 0.0:
+        return 0.0
+    if conf > 1.0:
+        return 1.0
+    return conf
+
+
+def _normalize_category(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized in ALLOWED_CATEGORIES:
+        return normalized
+    return normalized
+
+
+def _normalize_payer(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized in ALLOWED_PAYERS:
+        return normalized
+    return normalized
+
+
 def init_db():
     conn = connect()
     c = conn.cursor()
@@ -48,12 +97,15 @@ def init_db():
             category_ai TEXT,
             ai_confidence REAL,
             ai_updated_at TEXT,
-            confidence REAL
+            confidence REAL,
+            raw_description TEXT NOT NULL DEFAULT '',
+            cleaned_description TEXT,
+            classification_source TEXT NOT NULL DEFAULT 'heuristic',
+            is_recurring INTEGER NOT NULL DEFAULT 0
         )
         """
     )
 
-    # Consolidacao idempotente do schema atual sem renomear/remover colunas existentes.
     required_columns = {
         "date": "TEXT",
         "description": "TEXT",
@@ -69,9 +121,26 @@ def init_db():
         "ai_confidence": "REAL",
         "ai_updated_at": "TEXT",
         "confidence": "REAL",
+        "raw_description": "TEXT NOT NULL DEFAULT ''",
+        "cleaned_description": "TEXT",
+        "classification_source": "TEXT NOT NULL DEFAULT 'heuristic'",
+        "is_recurring": "INTEGER NOT NULL DEFAULT 0",
     }
+
     for column, column_type in required_columns.items():
         _add_column_if_missing(conn, "transactions", column, column_type)
+
+    # Backfill minimo para manter consistencia dos novos campos em bases antigas.
+    conn.execute(
+        """
+        UPDATE transactions
+        SET raw_description = COALESCE(NULLIF(raw_description, ''), description, ''),
+            cleaned_description = COALESCE(cleaned_description, description_ai, description),
+            classification_source = COALESCE(NULLIF(classification_source, ''), 'heuristic'),
+            is_recurring = COALESCE(is_recurring, 0),
+            confidence = COALESCE(confidence, ai_confidence, 0.0)
+        """
+    )
 
     conn.commit()
     conn.close()
@@ -81,7 +150,24 @@ def insert_transaction(t: Transaction):
     conn = connect()
     c = conn.cursor()
 
+    raw_description = (t.raw_description or "").strip()
+    if not raw_description:
+        conn.close()
+        raise ValueError("raw_description nao pode ser vazio")
+
     imported_at = t.imported_at or datetime.now().isoformat()
+    cleaned_description = t.cleaned_description or t.description_ai or t.description or raw_description
+
+    classification_source = _normalize_source(t.classification_source)
+    confidence_value = t.confidence if t.confidence is not None else t.ai_confidence
+    confidence = _normalize_confidence(confidence_value, classification_source)
+
+    category = _normalize_category(t.category)
+    payer = _normalize_payer(t.payer)
+    if category is None and payer is None:
+        classification_source = "heuristic"
+        confidence = 0.0
+
     ai_updated_at = t.ai_updated_at
     if ai_updated_at is None and t.ai_confidence is not None:
         ai_updated_at = datetime.now().isoformat()
@@ -90,8 +176,9 @@ def insert_transaction(t: Transaction):
         """
         INSERT INTO transactions
         (date, description, amount, account, type, category, payer, source_file,
-         imported_at, description_ai, category_ai, ai_confidence, ai_updated_at, confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         imported_at, description_ai, category_ai, ai_confidence, ai_updated_at,
+         confidence, raw_description, cleaned_description, classification_source, is_recurring)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             t.date.isoformat(),
@@ -99,16 +186,45 @@ def insert_transaction(t: Transaction):
             t.amount,
             t.account,
             t.type,
-            t.category,
-            t.payer,
+            category,
+            payer,
             t.source_file,
             imported_at,
             t.description_ai,
             t.category_ai,
             t.ai_confidence,
             ai_updated_at,
-            t.ai_confidence,
+            confidence,
+            raw_description,
+            cleaned_description,
+            classification_source,
+            1 if t.is_recurring else 0,
         ),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def update_transaction_manual(tx_id: int, category: str, payer: str | None):
+    conn = connect()
+    c = conn.cursor()
+
+    normalized_category = _normalize_category(category)
+    normalized_payer = _normalize_payer(payer)
+
+    c.execute(
+        """
+        UPDATE transactions
+        SET category = ?,
+            category_ai = ?,
+            payer = ?,
+            classification_source = 'manual',
+            confidence = 1.0,
+            ai_confidence = 1.0
+        WHERE id = ?
+        """,
+        (normalized_category, normalized_category, normalized_payer, tx_id),
     )
 
     conn.commit()

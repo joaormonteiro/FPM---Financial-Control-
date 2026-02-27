@@ -90,7 +90,7 @@ def _heuristic_category(text: str) -> str:
 def enhance_transaction(raw_description: str, amount: float):
     """
     Enriquecimento offline de transacao financeira.
-    Retorna: (description, category, payer, confidence)
+    Retorna: (cleaned_description, category, payer, confidence, classification_source)
     """
     cleaned_hint = _clean_description(raw_description)
     rule_result = apply_rules(raw_description, amount)
@@ -102,7 +102,8 @@ def enhance_transaction(raw_description: str, amount: float):
             _normalize_category(rule_category),
             (rule_payer or "Joao").strip(),
             float(rule_conf),
+            "rule",
         )
 
     category = _heuristic_category(raw_description)
-    return cleaned_hint or raw_description, category, "Joao", 0.0
+    return cleaned_hint or raw_description, category, "Joao", 0.0, "heuristic"
