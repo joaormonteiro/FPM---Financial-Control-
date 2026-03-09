@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from ai.recurrence_engine import detect_recurring_transactions
-from classifier import classify
 from db import connect, insert_transaction
 from importers.inter_csv import parse_inter_csv
 
@@ -14,7 +13,6 @@ class ImportController:
         try:
             transactions = parse_inter_csv(file_path)
             for transaction in transactions:
-                classify(transaction)
                 insert_transaction(transaction)
 
             conn = connect()

@@ -3,24 +3,24 @@
 # Valor: categoria correspondente
 CATEGORIES = {
     # Transporte
-    "UBER": "Transporte",
-    "99": "Transporte",
-    "ONIBUS": "Transporte",
-    "METRO": "Transporte",
+    "UBER": "transporte",
+    "99": "transporte",
+    "ONIBUS": "transporte",
+    "METRO": "transporte",
 
     # Alimentacao
-    "IFOOD": "Alimentação",
-    "PADARIA": "Alimentação",
-    "MERCADO": "Alimentação",
-    "RESTAURANTE": "Alimentação",
+    "IFOOD": "alimentacao",
+    "PADARIA": "alimentacao",
+    "MERCADO": "alimentacao",
+    "RESTAURANTE": "alimentacao",
 
     # Assinaturas e servicos
-    "SPOTIFY": "Lazer",
-    "NETFLIX": "Lazer",
-    "AMAZON": "Lazer",
+    "SPOTIFY": "assinaturas",
+    "NETFLIX": "assinaturas",
+    "AMAZON": "assinaturas",
 
     # Banco / pagamentos
-    "INTER": "Outros"
+    "INTER": "outros"
 }
 
 # Lista de palavras-chave que indicam que o pagamento foi feito pelos pais

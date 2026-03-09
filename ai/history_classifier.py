@@ -25,7 +25,7 @@ class HistoryBasedClassifier:
             """
             SELECT cleaned_description, category, payer
             FROM transactions
-            WHERE classification_source IN ('manual', 'rule')
+            WHERE classification_source IN ('manual', 'rule', 'pattern', 'gemini')
               AND category IS NOT NULL
               AND cleaned_description IS NOT NULL
               AND TRIM(cleaned_description) <> ''

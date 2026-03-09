@@ -73,8 +73,8 @@ def apply_rules(raw_description: str, amount: float) -> Optional[Tuple[str, str,
                 if _amount_matches(amount, cond):
                     return (
                         cond.get("description", raw_description),
-                        cond.get("category", "Outros"),
-                        cond.get("payer", "Joao"),
+                        cond.get("category", "outros"),
+                        cond.get("payer", "eu"),
                         0.95,
                     )
 
@@ -82,8 +82,8 @@ def apply_rules(raw_description: str, amount: float) -> Optional[Tuple[str, str,
             continue
 
         description = rules.get("description", raw_description)
-        category = rules.get("category", "Outros")
-        payer = rules.get("payer", "Joao")
+        category = rules.get("category", "outros")
+        payer = rules.get("payer", "eu")
 
         return description, category, payer, 0.95
 

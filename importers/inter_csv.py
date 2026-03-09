@@ -77,10 +77,14 @@ def parse_inter_csv(path: str):
 
         ttype = "debit" if amount < 0 else "credit"
 
-        cleaned_description, category, payer, confidence, classification_source = enhance_transaction(
-            raw_description,
-            amount,
-        )
+        (
+            cleaned_description,
+            category,
+            payer,
+            confidence,
+            classification_source,
+            normalized_description,
+        ) = enhance_transaction(raw_description, amount)
 
         t = Transaction(
             date=datetime.strptime(date_str, "%d/%m/%Y").date(),
@@ -92,6 +96,7 @@ def parse_inter_csv(path: str):
             category=category,
             payer=payer,
             source_file=path,
+            normalized_description=normalized_description,
             cleaned_description=cleaned_description,
             classification_source=classification_source,
             confidence=confidence,

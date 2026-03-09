@@ -2,7 +2,6 @@ from pathlib import Path
 import sys
 
 from ai.recurrence_engine import detect_recurring_transactions
-from classifier import classify
 from db import connect, init_db, insert_transaction
 from importers.inter_csv import parse_inter_csv
 
@@ -31,7 +30,6 @@ def main():
     transactions = parse_inter_csv(file_path)
 
     for t in transactions:
-        classify(t)
         insert_transaction(t)
 
     conn = connect()

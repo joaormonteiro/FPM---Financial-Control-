@@ -1,6 +1,9 @@
 ﻿import sqlite3
+import unicodedata
 from datetime import datetime
 
+from ai.description_normalizer import normalize_description
+from ai.learned_patterns import ensure_learned_patterns_table, upsert_learned_pattern
 from models import (
     ALLOWED_CATEGORIES,
     ALLOWED_CLASSIFICATION_SOURCES,
@@ -32,8 +35,38 @@ def _add_column_if_missing(
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
 
+def _to_key(value: str) -> str:
+    return (
+        unicodedata.normalize("NFKD", value)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .strip()
+        .lower()
+    )
+
+
+_LEGACY_CATEGORY_MAP = {
+    "alimentacao": "alimentacao",
+    "lazer": "lazer",
+    "transporte": "transporte",
+    "educacao": "educacao",
+    "moradia": "moradia",
+    "assinatura": "assinaturas",
+    "assinaturas": "assinaturas",
+    "outro": "outros",
+    "outros": "outros",
+    "saude": "outros",
+}
+
+_LEGACY_PAYER_MAP = {
+    "joao": "eu",
+    "eu": "eu",
+    "pais": "pais",
+}
+
+
 def _normalize_source(source: str | None) -> str:
-    allowed_sources = set(ALLOWED_CLASSIFICATION_SOURCES) | {"history"}
+    allowed_sources = set(ALLOWED_CLASSIFICATION_SOURCES)
     normalized = (source or "heuristic").strip().lower()
     if normalized not in allowed_sources:
         return "heuristic"
@@ -58,23 +91,25 @@ def _normalize_confidence(value: float | None, source: str) -> float:
 def _normalize_category(value: str | None) -> str | None:
     if value is None:
         return None
-    normalized = value.strip()
-    if not normalized:
+    key = _to_key(value)
+    if not key:
         return None
+    normalized = _LEGACY_CATEGORY_MAP.get(key, key)
     if normalized in ALLOWED_CATEGORIES:
         return normalized
-    return normalized
+    return "outros"
 
 
 def _normalize_payer(value: str | None) -> str | None:
     if value is None:
         return None
-    normalized = value.strip()
-    if not normalized:
+    key = _to_key(value)
+    if not key:
         return None
+    normalized = _LEGACY_PAYER_MAP.get(key, key)
     if normalized in ALLOWED_PAYERS:
         return normalized
-    return normalized
+    return None
 
 
 def init_db():
@@ -92,6 +127,7 @@ def init_db():
             type TEXT,
             category TEXT,
             payer TEXT,
+            note TEXT,
             source_file TEXT,
             imported_at TEXT,
             description_ai TEXT,
@@ -100,6 +136,7 @@ def init_db():
             ai_updated_at TEXT,
             confidence REAL,
             raw_description TEXT NOT NULL DEFAULT '',
+            normalized_description TEXT,
             cleaned_description TEXT,
             classification_source TEXT NOT NULL DEFAULT 'heuristic',
             is_recurring INTEGER NOT NULL DEFAULT 0,
@@ -117,6 +154,7 @@ def init_db():
         "type": "TEXT",
         "category": "TEXT",
         "payer": "TEXT",
+        "note": "TEXT",
         "source_file": "TEXT",
         "imported_at": "TEXT",
         "description_ai": "TEXT",
@@ -125,6 +163,7 @@ def init_db():
         "ai_updated_at": "TEXT",
         "confidence": "REAL",
         "raw_description": "TEXT NOT NULL DEFAULT ''",
+        "normalized_description": "TEXT",
         "cleaned_description": "TEXT",
         "classification_source": "TEXT NOT NULL DEFAULT 'heuristic'",
         "is_recurring": "INTEGER NOT NULL DEFAULT 0",
@@ -145,9 +184,51 @@ def init_db():
             is_recurring = COALESCE(is_recurring, 0),
             recurrence_group_id = COALESCE(recurrence_group_id, NULL),
             recurrence_confidence = COALESCE(recurrence_confidence, NULL),
-            confidence = COALESCE(confidence, ai_confidence, 0.0)
+            confidence = COALESCE(confidence, ai_confidence, 0.0),
+            note = COALESCE(note, ''),
+            normalized_description = COALESCE(
+                normalized_description,
+                cleaned_description,
+                raw_description,
+                description
+            )
         """
     )
+
+    c.execute(
+        """
+        SELECT id, category, category_ai, payer, raw_description, description, normalized_description
+        FROM transactions
+        """
+    )
+    rows = c.fetchall()
+
+    for tx_id, category, category_ai, payer, raw_description, description, normalized_description in rows:
+        normalized_category = _normalize_category(category)
+        normalized_category_ai = _normalize_category(category_ai)
+        normalized_payer = _normalize_payer(payer)
+        normalized_desc = normalize_description(
+            str(raw_description or description or normalized_description or "")
+        )
+        c.execute(
+            """
+            UPDATE transactions
+            SET category = ?,
+                category_ai = ?,
+                payer = ?,
+                normalized_description = ?
+            WHERE id = ?
+            """,
+            (
+                normalized_category,
+                normalized_category_ai,
+                normalized_payer,
+                normalized_desc,
+                int(tx_id),
+            ),
+        )
+
+    ensure_learned_patterns_table(conn)
 
     conn.commit()
     conn.close()
@@ -163,7 +244,9 @@ def insert_transaction(t: Transaction):
         raise ValueError("raw_description nao pode ser vazio")
 
     imported_at = t.imported_at or datetime.now().isoformat()
-    cleaned_description = t.cleaned_description or t.description_ai or t.description or raw_description
+    cleaned_description = (t.cleaned_description or t.description_ai or t.description or raw_description).strip()
+    normalized_description = (t.normalized_description or normalize_description(raw_description)).strip()
+    note = (t.note or "").strip()
 
     classification_source = _normalize_source(t.classification_source)
     confidence_value = t.confidence if t.confidence is not None else t.ai_confidence
@@ -171,6 +254,7 @@ def insert_transaction(t: Transaction):
 
     category = _normalize_category(t.category)
     payer = _normalize_payer(t.payer)
+    category_ai = _normalize_category(t.category_ai or category)
     if category is None and payer is None:
         classification_source = "heuristic"
         confidence = 0.0
@@ -182,11 +266,11 @@ def insert_transaction(t: Transaction):
     c.execute(
         """
         INSERT INTO transactions
-        (date, description, amount, account, type, category, payer, source_file,
+        (date, description, amount, account, type, category, payer, note, source_file,
          imported_at, description_ai, category_ai, ai_confidence, ai_updated_at,
-         confidence, raw_description, cleaned_description, classification_source, is_recurring,
+         confidence, raw_description, normalized_description, cleaned_description, classification_source, is_recurring,
          recurrence_group_id, recurrence_confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             t.date.isoformat(),
@@ -196,14 +280,16 @@ def insert_transaction(t: Transaction):
             t.type,
             category,
             payer,
+            note,
             t.source_file,
             imported_at,
             t.description_ai,
-            t.category_ai,
+            category_ai,
             t.ai_confidence,
             ai_updated_at,
             confidence,
             raw_description,
+            normalized_description,
             cleaned_description,
             classification_source,
             1 if t.is_recurring else 0,
@@ -216,25 +302,83 @@ def insert_transaction(t: Transaction):
     conn.close()
 
 
-def update_transaction_manual(tx_id: int, category: str, payer: str | None):
+def update_transaction_manual(
+    tx_id: int,
+    category: str | None = None,
+    payer: str | None = None,
+    description: str | None = None,
+    amount: float | None = None,
+    note: str | None = None,
+) -> None:
     conn = connect()
     c = conn.cursor()
 
-    normalized_category = _normalize_category(category)
-    normalized_payer = _normalize_payer(payer)
+    c.execute(
+        """
+        SELECT raw_description, description, amount, note, category, payer
+        FROM transactions
+        WHERE id = ?
+        """,
+        (int(tx_id),),
+    )
+    row = c.fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError(f"Transacao {tx_id} nao encontrada.")
+
+    raw_description, current_description, current_amount, current_note, current_category, current_payer = row
+    final_description = (description if description is not None else current_description or raw_description or "").strip()
+    if not final_description:
+        final_description = str(raw_description or "").strip()
+
+    final_category = _normalize_category(category if category is not None else current_category) or "outros"
+    final_payer = _normalize_payer(payer if payer is not None else current_payer)
+    source_amount = current_amount if amount is None else amount
+    final_amount = float(source_amount or 0.0)
+    final_note = (current_note if note is None else note) or ""
+    final_note = str(final_note).strip()
+    normalized_description = normalize_description(str(raw_description or final_description or ""))
 
     c.execute(
         """
         UPDATE transactions
-        SET category = ?,
+        SET description = ?,
+            description_ai = ?,
+            cleaned_description = ?,
+            category = ?,
             category_ai = ?,
             payer = ?,
+            amount = ?,
+            note = ?,
+            normalized_description = ?,
             classification_source = 'manual',
             confidence = 1.0,
-            ai_confidence = 1.0
+            ai_confidence = 1.0,
+            ai_updated_at = ?
         WHERE id = ?
         """,
-        (normalized_category, normalized_category, normalized_payer, tx_id),
+        (
+            final_description,
+            final_description,
+            final_description,
+            final_category,
+            final_category,
+            final_payer,
+            final_amount,
+            final_note,
+            normalized_description,
+            datetime.now().isoformat(),
+            int(tx_id),
+        ),
+    )
+
+    ensure_learned_patterns_table(conn)
+    upsert_learned_pattern(
+        descricao_normalizada=normalized_description,
+        descricao_editada_usuario=final_description,
+        categoria=final_category,
+        pagador=final_payer,
+        conn=conn,
     )
 
     conn.commit()

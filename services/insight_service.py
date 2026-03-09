@@ -7,10 +7,7 @@ from services.query_service import get_top_expenses, get_total_by_category
 
 SUPERFLUOUS_CATEGORIES = {
     "LAZER",
-    "DELIVERY",
-    "RESTAURANTE",
-    "ASSINATURA",
-    "COMPRAS",
+    "ASSINATURAS",
 }
 
 

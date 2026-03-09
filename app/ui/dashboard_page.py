@@ -180,7 +180,7 @@ class DashboardPage(QWidget):
 
             if value < 0 and not is_investment:
                 total_spent += value
-            if value < 0 and str(payer or "").strip() == "Pais":
+            if value < 0 and str(payer or "").strip().lower() in {"pais"}:
                 parents_paid += value
             if value > 0:
                 total_received += value

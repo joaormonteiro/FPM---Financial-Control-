@@ -1,23 +1,24 @@
-﻿import re
+from __future__ import annotations
+
+import re
 import unicodedata
 
-from .custom_rule_engine import apply_custom_rule
-from .history_classifier import HistoryBasedClassifier
-from .rule_engine import apply_rules
-
-ENABLE_AI = False
+from ai.description_normalizer import normalize_description
+from ai.gemini_client import GeminiClientError, classify_with_gemini, is_gemini_available
+from ai.learned_patterns import get_learned_pattern
 
 ALLOWED_CATEGORIES = {
-    "alimentacao": "Alimentação",
-    "saude": "Saúde",
-    "transporte": "Transporte",
-    "lazer": "Lazer",
-    "outros": "Outros",
+    "alimentacao",
+    "lazer",
+    "transporte",
+    "educacao",
+    "moradia",
+    "assinaturas",
+    "outros",
 }
+ALLOWED_PAYERS = {"eu", "pais"}
 
-PIX_RE = re.compile(r"^Pix\s+(enviado|recebido):\s*\"?(.+?)\"?$", re.IGNORECASE)
-COMPRA_RE = re.compile(r"^Compra no debito:\s*\"?(.+?)\"?$", re.IGNORECASE)
-_HISTORY_CLASSIFIER: HistoryBasedClassifier | None = None
+_SPOTIFY_RE = re.compile(r"\bspotify\b", re.IGNORECASE)
 
 
 def _strip_accents(text: str) -> str:
@@ -28,119 +29,127 @@ def _strip_accents(text: str) -> str:
     )
 
 
-def _title_if_upper(text: str) -> str:
-    if text and text.isupper():
-        return text.title()
-    return text
+def _guess_category(normalized_description: str) -> str:
+    d = _strip_accents(normalized_description).upper()
+
+    if any(k in d for k in ["UBER", "99", "TAXI", "METRO", "ONIBUS", "PASSAGEM"]):
+        return "transporte"
+    if any(k in d for k in ["PADARIA", "MERCADO", "IFOOD", "RESTAURANTE", "LANCH", "PIZZA"]):
+        return "alimentacao"
+    if any(k in d for k in ["ESCOLA", "CURSO", "FACULDADE", "LIVRO"]):
+        return "educacao"
+    if any(k in d for k in ["ALUGUEL", "CONDOMINIO", "LUZ", "AGUA", "INTERNET"]):
+        return "moradia"
+    if any(k in d for k in ["SPOTIFY", "NETFLIX", "AMAZON PRIME", "YOUTUBE PREMIUM"]):
+        return "assinaturas"
+    if any(k in d for k in ["CINEMA", "SHOW", "BAR", "JOGO", "STEAM"]):
+        return "lazer"
+    return "outros"
 
 
-def _clean_merchant(text: str) -> str:
-    cleaned = text
-    cleaned = re.sub(r"^No estabelecimento\s+", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^PAG\\*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\bBRA\b", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\bSP\b", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return _title_if_upper(cleaned)
+def _guess_payer(normalized_description: str) -> str:
+    d = _strip_accents(normalized_description).upper()
+    parent_hints = ["ALUGUEL", "FACULDADE", "SPOTIFY", "NETFLIX", "MERCADO"]
+    if any(k in d for k in parent_hints):
+        return "pais"
+    return "eu"
 
 
-def _clean_pix_party(text: str) -> str:
-    cleaned = re.sub(r"^Cp\s*:\s*\d+\s*-?\s*", "", text, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^\d+\s+\d+\s+", "", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return _title_if_upper(cleaned)
+def _offline_classification(raw_description: str, normalized_description: str) -> tuple[str, str, str]:
+    short_description = normalized_description or _strip_accents(raw_description).lower().strip()
+    if not short_description:
+        short_description = "transacao"
+    category = _guess_category(short_description)
+    payer = _guess_payer(short_description)
+    return short_description, category, payer
 
 
-def _clean_description(raw_description: str) -> str:
-    raw = raw_description.strip()
-
-    pix_match = PIX_RE.match(raw)
-    if pix_match:
-        direction = pix_match.group(1).lower()
-        party = _clean_pix_party(pix_match.group(2))
-        if party:
-            return f"Pix {direction}: {party}"
-        return f"Pix {direction}"
-
-    compra_match = COMPRA_RE.match(raw)
-    if compra_match:
-        merchant = _clean_merchant(compra_match.group(1))
-        return merchant or raw_description
-
-    return _title_if_upper(raw_description.strip())
+def _sanitize_category(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    return normalized if normalized in ALLOWED_CATEGORIES else "outros"
 
 
-def _normalize_category(cat: str | None) -> str:
-    if not cat:
-        return "Outros"
-    key = _strip_accents(cat).strip().lower()
-    return ALLOWED_CATEGORIES.get(key, "Outros")
-
-
-def _heuristic_category(text: str) -> str:
-    d = _strip_accents(text).upper()
-    if any(k in d for k in ["UBER", "99", "TAXI", "METRO", "ONIBUS", "COLETIVO"]):
-        return "Transporte"
-    if any(k in d for k in ["PADARIA", "MERCADO", "MERCEARIA", "IFOOD", "RESTAURANTE", "BAR"]):
-        return "Alimentação"
-    if any(k in d for k in ["FARMACIA", "CLINICA", "HOSPITAL", "TERAPIA"]):
-        return "Saúde"
-    if any(k in d for k in ["NETFLIX", "SPOTIFY", "CINEMA", "STREAMING", "AMAZON PRIME"]):
-        return "Lazer"
-    return "Outros"
-
-
-def _get_history_classifier() -> HistoryBasedClassifier:
-    global _HISTORY_CLASSIFIER
-    if _HISTORY_CLASSIFIER is None:
-        _HISTORY_CLASSIFIER = HistoryBasedClassifier("data/finance.db")
-        _HISTORY_CLASSIFIER.build_index()
-    return _HISTORY_CLASSIFIER
+def _sanitize_payer(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    return normalized if normalized in ALLOWED_PAYERS else "eu"
 
 
 def enhance_transaction(raw_description: str, amount: float):
     """
-    Enriquecimento offline de transacao financeira.
-    Retorna: (cleaned_description, category, payer, confidence, classification_source)
+    Fluxo:
+    1) normaliza descricao
+    2) regra fixa (spotify)
+    3) busca padrao aprendido
+    4) se nao houver padrao: Gemini (quando disponivel), com fallback offline
+
+    Retorna:
+    (descricao_editada, categoria, pagador, confianca, origem_classificacao, descricao_normalizada)
     """
-    cleaned_hint = _clean_description(raw_description)
-    rule_result = apply_rules(raw_description, amount)
+    _ = amount  # reservado para regras futuras por valor
+    raw = (raw_description or "").strip()
+    normalized_description = normalize_description(raw)
 
-    if rule_result is not None:
-        rule_desc, rule_category, rule_payer, rule_conf = rule_result
+    if _SPOTIFY_RE.search(raw) or _SPOTIFY_RE.search(normalized_description):
+        return "spotify", "assinaturas", "pais", 1.0, "rule", normalized_description
+
+    pattern = get_learned_pattern(normalized_description)
+    if pattern is not None:
+        learned_description = (pattern.get("descricao_editada_usuario") or "").strip() or raw
+        learned_category = _sanitize_category(pattern.get("categoria"))
+        learned_payer = _sanitize_payer(pattern.get("pagador"))
+        usage = int(pattern.get("contador_uso") or 1)
+        confidence = min(0.7 + (usage * 0.05), 1.0)
         return (
-            rule_desc or cleaned_hint or raw_description,
-            _normalize_category(rule_category),
-            (rule_payer or "Joao").strip(),
-            float(rule_conf),
-            "rule",
+            learned_description,
+            learned_category,
+            learned_payer,
+            confidence,
+            "pattern",
+            normalized_description,
         )
 
-    custom_rule_result = apply_custom_rule(
-        cleaned_hint or raw_description,
-        amount,
-        is_recurring=False,
+    fallback_description, fallback_category, fallback_payer = _offline_classification(
+        raw,
+        normalized_description,
     )
-    if custom_rule_result is not None:
-        custom_category, custom_confidence = custom_rule_result
+
+    if not is_gemini_available():
         return (
-            cleaned_hint or raw_description,
-            _normalize_category(custom_category),
-            "Joao",
-            float(custom_confidence),
-            "rule",
+            fallback_description,
+            fallback_category,
+            fallback_payer,
+            0.45,
+            "fallback",
+            normalized_description,
         )
 
-    history_prediction = _get_history_classifier().predict(cleaned_hint or raw_description)
-    if history_prediction is not None:
-        category, payer, confidence = history_prediction
+    try:
+        gemini_result = classify_with_gemini(raw)
+    except GeminiClientError:
         return (
-            cleaned_hint or raw_description,
-            _normalize_category(category),
-            (payer or "Joao").strip(),
-            float(confidence),
-            "history",
+            fallback_description,
+            fallback_category,
+            fallback_payer,
+            0.45,
+            "fallback",
+            normalized_description,
         )
 
-    category = _heuristic_category(raw_description)
-    return cleaned_hint or raw_description, category, "Joao", 0.0, "heuristic"
+    gemini_description = (gemini_result.get("descricao") or "").strip() or fallback_description
+    gemini_category = _sanitize_category(gemini_result.get("categoria"))
+    gemini_payer = _sanitize_payer(gemini_result.get("pagador"))
+
+    # Se Gemini retornar "outros" e o fallback local tiver match forte, aproveita a melhoria local.
+    if gemini_category == "outros" and fallback_category != "outros":
+        gemini_category = fallback_category
+
+    confidence = 0.8 if gemini_category != "outros" else 0.6
+    return (
+        gemini_description,
+        gemini_category,
+        gemini_payer,
+        confidence,
+        "gemini",
+        normalized_description,
+    )
+

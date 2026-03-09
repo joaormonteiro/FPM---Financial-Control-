@@ -15,12 +15,12 @@ def classify(transaction):
                 transaction.category = cat
                 break
         else:
-            transaction.category = "Outros"
+            transaction.category = "outros"
 
     if not transaction.payer:
         for key in PARENTS_PAY:
             if key in desc:
-                transaction.payer = "Pais"
+                transaction.payer = "pais"
                 return
 
-        transaction.payer = "Joao"
+        transaction.payer = "eu"

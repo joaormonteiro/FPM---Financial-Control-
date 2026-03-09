@@ -9,9 +9,9 @@ import streamlit as st
 
 from ai.chat_controller import handle_user_question
 from ai.custom_rule_engine import add_custom_rule, delete_custom_rule, load_custom_rules
+from ai.description_normalizer import normalize_description
 from ai.financial_advisor import generate_financial_advice
 from ai.recurrence_engine import detect_recurring_transactions
-from classifier import classify
 from db import (
     connect,
     init_db,
@@ -43,7 +43,6 @@ def _import_csv_file(uploaded_file) -> tuple[bool, str]:
 
         transactions = parse_inter_csv(temp_path)
         for t in transactions:
-            classify(t)
             insert_transaction(t)
 
         conn = connect()
@@ -82,8 +81,9 @@ def _add_manual_transaction(
             account="Manual",
             type=ttype,
             category=category,
-            payer="Joao",
+            payer="eu",
             source_file="manual_entry",
+            normalized_description=normalize_description(description.strip()),
             cleaned_description=description.strip(),
             classification_source="manual",
             confidence=1.0,
@@ -210,7 +210,10 @@ with main_tab:
         )
 
     total_spent = filtered_df[(filtered_df.amount < 0) & (~is_investment)]["amount"].sum()
-    parents = filtered_df[(filtered_df.amount < 0) & (filtered_df.payer == "Pais")]["amount"].sum()
+    parents = filtered_df[
+        (filtered_df.amount < 0)
+        & (filtered_df.payer.astype(str).str.lower() == "pais")
+    ]["amount"].sum()
     total_received = filtered_df[filtered_df.amount > 0]["amount"].sum()
 
     m1.metric("Total Gasto", f"R$ {abs(total_spent):.2f}".replace(".", ","))
@@ -303,7 +306,7 @@ with main_tab:
     table["Quem pagou"] = (
         table["payer"]
         .fillna("Desconhecido")
-        .replace({"Joao": "Joao"})
+        .replace({"eu": "eu", "pais": "pais"})
     )
 
     if "category_ai" in table.columns:
@@ -414,7 +417,7 @@ with main_tab:
             st.caption(str(selected_row.get("raw_description") or selected_row.get("description") or ""))
 
             current_category = selected_row.get("category")
-            default_category = current_category if current_category in ALLOWED_CATEGORIES else "Outros"
+            default_category = current_category if current_category in ALLOWED_CATEGORIES else "outros"
 
             current_payer = selected_row.get("payer")
             payer_choices = ["", *ALLOWED_PAYERS]

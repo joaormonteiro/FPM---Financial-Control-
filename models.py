@@ -3,19 +3,29 @@ from datetime import date
 from typing import Optional
 
 
-ALLOWED_CLASSIFICATION_SOURCES = {"manual", "rule", "heuristic"}
+ALLOWED_CLASSIFICATION_SOURCES = {
+    "manual",
+    "rule",
+    "heuristic",
+    "history",
+    "pattern",
+    "gemini",
+    "fallback",
+}
 
 ALLOWED_CATEGORIES = [
-    "Transporte",
-    "Alimentação",
-    "Saúde",
-    "Lazer",
-    "Outros",
+    "alimentacao",
+    "lazer",
+    "transporte",
+    "educacao",
+    "moradia",
+    "assinaturas",
+    "outros",
 ]
 
 ALLOWED_PAYERS = [
-    "Joao",
-    "Pais",
+    "eu",
+    "pais",
 ]
 
 
@@ -35,10 +45,12 @@ class Transaction:
     source_file: Optional[str] = None
 
     # Consolidacao Fase 2
+    normalized_description: Optional[str] = None
     cleaned_description: Optional[str] = None
     classification_source: str = "heuristic"
     confidence: Optional[float] = None
     is_recurring: int = 0
+    note: Optional[str] = None
 
     # Campos opcionais com default (deve vir por ultimo)
     id: Optional[int] = None
