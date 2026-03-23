@@ -12,15 +12,16 @@ from ai.custom_rule_engine import add_custom_rule, delete_custom_rule, load_cust
 from ai.description_normalizer import normalize_description
 from ai.financial_advisor import generate_financial_advice
 from ai.recurrence_engine import detect_recurring_transactions
-from db import (
+from core.db import (
     connect,
     init_db,
     insert_transaction,
     set_transaction_recurring,
     update_transaction_manual,
 )
+from core.settings import DB_PATH
 from importers.inter_csv import parse_inter_csv
-from models import ALLOWED_CATEGORIES, ALLOWED_PAYERS, Transaction
+from core.models import ALLOWED_CATEGORIES, ALLOWED_PAYERS, Transaction
 from services.insight_service import generate_monthly_insights
 
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
@@ -29,10 +30,44 @@ init_db()
 
 
 def _load_df() -> pd.DataFrame:
-    conn = sqlite3.connect("data/finance.db")
+    conn = sqlite3.connect(DB_PATH)
     data = pd.read_sql("SELECT * FROM transactions", conn)
     conn.close()
     return data
+
+
+def _resolve_reference_period() -> tuple[int, int]:
+    now = datetime.now()
+    current_start = datetime(now.year, now.month, 1).strftime("%Y-%m-%d")
+    if now.month == 12:
+        next_month = datetime(now.year + 1, 1, 1)
+    else:
+        next_month = datetime(now.year, now.month + 1, 1)
+    current_end = next_month.strftime("%Y-%m-%d")
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM transactions
+        WHERE date >= ? AND date < ?
+        """,
+        (current_start, current_end),
+    )
+    count_current = int(cur.fetchone()[0] or 0)
+    if count_current > 0:
+        conn.close()
+        return now.month, now.year
+
+    cur.execute("SELECT MAX(date) FROM transactions")
+    row = cur.fetchone()
+    conn.close()
+    max_date = str(row[0] or "").strip()
+    if len(max_date) >= 7:
+        return int(max_date[5:7]), int(max_date[0:4])
+
+    return now.month, now.year
 
 
 def _import_csv_file(uploaded_file) -> tuple[bool, str]:
@@ -41,16 +76,23 @@ def _import_csv_file(uploaded_file) -> tuple[bool, str]:
             tmp.write(uploaded_file.getbuffer())
             temp_path = tmp.name
 
-        transactions = parse_inter_csv(temp_path)
+        original_name = getattr(uploaded_file, "name", None)
+        transactions = parse_inter_csv(temp_path, source_name=original_name or temp_path)
+        inserted = 0
         for t in transactions:
-            insert_transaction(t)
+            if insert_transaction(t):
+                inserted += 1
 
         conn = connect()
         detect_recurring_transactions(conn)
         conn.close()
 
         os.unlink(temp_path)
-        return True, f"Importação concluída: {len(transactions)} transações adicionadas."
+        skipped = len(transactions) - inserted
+        return True, (
+            f"Importação concluída: {inserted} transações adicionadas, "
+            f"{skipped} ignoradas (duplicadas)."
+        )
     except Exception as exc:
         try:
             if "temp_path" in locals() and os.path.exists(temp_path):
@@ -97,7 +139,7 @@ def _add_manual_transaction(
         insert_transaction(tx)
 
         if is_recurring:
-            conn = sqlite3.connect("data/finance.db")
+            conn = sqlite3.connect(DB_PATH)
             cur = conn.cursor()
             cur.execute("SELECT MAX(id) FROM transactions")
             row = cur.fetchone()
@@ -224,9 +266,8 @@ with main_tab:
 
     st.header("Insights e Conselhos")
 
-    now = datetime.now()
-    current_month = now.month
-    current_year = now.year
+    current_month, current_year = _resolve_reference_period()
+    st.caption(f"Período em análise: {current_month:02d}/{current_year}")
 
     insight_col_1, insight_col_2 = st.columns(2)
     with insight_col_1:
@@ -289,9 +330,9 @@ with main_tab:
     table = filtered_df.copy()
 
     tipo_map = {
-        "debit": "Debito",
-        "credit": "Credito",
-        "transfer": "Transferencia",
+        "debit": "Débito",
+        "credit": "Crédito",
+        "transfer": "Transferência",
         "payment": "Pagamento",
     }
 
@@ -315,9 +356,9 @@ with main_tab:
         table["Categoria"] = table["category"]
 
     if "description_ai" in table.columns:
-        table["Descricao"] = table["description_ai"].fillna(table["description"])
+        table["Descrição"] = table["description_ai"].fillna(table["description"])
     else:
-        table["Descricao"] = table["description"]
+        table["Descrição"] = table["description"]
 
     table["Valor_num"] = table["amount"].astype(float)
 
@@ -330,7 +371,7 @@ with main_tab:
     table["Valor"] = table["Valor_num"].apply(format_brl)
     table["Data"] = table["date"].dt.strftime("%d/%m/%Y")
 
-    display_cols = ["Data", "Tipo", "Categoria", "Descricao", "Valor", "Quem pagou"]
+    display_cols = ["Data", "Tipo", "Categoria", "Descrição", "Valor", "Quem pagou"]
     table_display = table[display_cols].copy().reset_index(drop=True)
 
     table_for_style = table.copy().reset_index(drop=True)

@@ -1,7 +1,7 @@
 ﻿import sqlite3
 from typing import Any
 
-DB_PATH = "data/finance.db"
+from core.settings import DB_PATH
 
 
 def get_total_by_month(year: int) -> dict[str, float]:

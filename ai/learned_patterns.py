@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
-DB_PATH = "data/finance.db"
+from core.settings import DB_PATH
 
 
 def _connect() -> sqlite3.Connection:

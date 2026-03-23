@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 
 from ai.recurrence_engine import detect_recurring_transactions
-from db import connect, init_db, insert_transaction
+from core.db import connect, init_db, insert_transaction
 from importers.inter_csv import parse_inter_csv
 
 
@@ -28,15 +28,21 @@ def main():
 
     file_path = _resolve_csv_path()
     transactions = parse_inter_csv(file_path)
+    inserted = 0
 
     for t in transactions:
-        insert_transaction(t)
+        if insert_transaction(t):
+            inserted += 1
 
     conn = connect()
     detect_recurring_transactions(conn)
     conn.close()
 
-    print(f"{len(transactions)} transacoes importadas com sucesso.")
+    skipped = len(transactions) - inserted
+    print(
+        f"Importação concluída: {inserted} transações adicionadas, "
+        f"{skipped} ignoradas (duplicadas)."
+    )
 
 
 if __name__ == "__main__":

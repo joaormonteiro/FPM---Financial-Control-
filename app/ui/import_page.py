@@ -42,7 +42,7 @@ class ImportPage(QWidget):
         line.addWidget(self.import_button)
         root.addLayout(line)
 
-        self.status_label = QLabel("Nenhuma importacao executada.")
+        self.status_label = QLabel("Nenhuma importação executada.")
         self.status_label.setWordWrap(True)
         root.addWidget(self.status_label)
         root.addStretch(1)

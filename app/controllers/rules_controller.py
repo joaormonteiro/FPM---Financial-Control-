@@ -25,7 +25,7 @@ class RulesController:
             normalized_recurring = recurring_option.strip().lower()
             if normalized_recurring == "sim":
                 is_recurring = True
-            elif normalized_recurring == "nao":
+            elif normalized_recurring in {"nao", "não"}:
                 is_recurring = False
 
             rule = {
@@ -39,7 +39,7 @@ class RulesController:
             add_custom_rule(rule)
             return True, "Regra criada com sucesso."
         except ValueError:
-            return False, "Valor minimo/maximo invalido."
+            return False, "Valor mínimo/máximo inválido."
         except Exception as exc:
             return False, f"Erro ao criar regra: {exc}"
 
@@ -50,6 +50,6 @@ class RulesController:
 
         try:
             delete_custom_rule(rid)
-            return True, "Regra excluida com sucesso."
+            return True, "Regra excluída com sucesso."
         except Exception as exc:
             return False, f"Erro ao excluir regra: {exc}"

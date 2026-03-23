@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.controllers.transaction_controller import TransactionController
-from models import ALLOWED_CATEGORIES, ALLOWED_PAYERS
+from core.models import ALLOWED_CATEGORIES, ALLOWED_PAYERS
 
 
 class TransactionsPage(QWidget):
@@ -42,7 +42,7 @@ class TransactionsPage(QWidget):
         root.setSpacing(10)
 
         header = QHBoxLayout()
-        title = QLabel("Transacoes")
+        title = QLabel("Transações")
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         self.refresh_button = QPushButton("Atualizar")
         header.addWidget(title)
@@ -53,7 +53,7 @@ class TransactionsPage(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(
-            ["Data", "Descricao", "Categoria", "Pagador", "Valor", "Observacao", "Recorrente"]
+            ["Data", "Descrição", "Categoria", "Pagador", "Valor", "Observação", "Recorrente"]
         )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(
@@ -66,24 +66,24 @@ class TransactionsPage(QWidget):
         root.addWidget(self.table, stretch=1)
 
         actions = QHBoxLayout()
-        self.save_button = QPushButton("Salvar alteracoes")
+        self.save_button = QPushButton("Salvar alterações")
         self.save_button.setStyleSheet("font-weight: 600;")
         actions.addStretch(1)
         actions.addWidget(self.save_button)
         root.addLayout(actions)
 
-        recurring_box = QGroupBox("Recorrencia")
+        recurring_box = QGroupBox("Recorrência")
         recurring_layout = QHBoxLayout(recurring_box)
         self.recurrence_group_input = QLineEdit()
         self.recurrence_group_input.setPlaceholderText(
-            "Grupo de recorrencia (opcional, ex: manual_123)"
+            "Grupo de recorrência (opcional, ex: manual_123)"
         )
         self.mark_recurring_button = QPushButton("Marcar selecionada como recorrente")
         recurring_layout.addWidget(self.recurrence_group_input, stretch=1)
         recurring_layout.addWidget(self.mark_recurring_button)
         root.addWidget(recurring_box)
 
-        manual_box = QGroupBox("Lancamento Manual")
+        manual_box = QGroupBox("Lançamento Manual")
         manual_layout = QGridLayout(manual_box)
         self.manual_date = QDateEdit()
         self.manual_date.setCalendarPopup(True)
@@ -96,11 +96,11 @@ class TransactionsPage(QWidget):
         self.manual_category = QComboBox()
         self.manual_category.addItems(ALLOWED_CATEGORIES)
         self.manual_recurring = QCheckBox("Recorrente")
-        self.manual_add_button = QPushButton("Adicionar lancamento")
+        self.manual_add_button = QPushButton("Adicionar lançamento")
 
         manual_layout.addWidget(QLabel("Data"), 0, 0)
         manual_layout.addWidget(self.manual_date, 0, 1)
-        manual_layout.addWidget(QLabel("Descricao"), 0, 2)
+        manual_layout.addWidget(QLabel("Descrição"), 0, 2)
         manual_layout.addWidget(self.manual_description, 0, 3)
         manual_layout.addWidget(QLabel("Valor"), 1, 0)
         manual_layout.addWidget(self.manual_amount, 1, 1)
@@ -141,7 +141,7 @@ class TransactionsPage(QWidget):
             payer_item = QTableWidgetItem(payer)
             amount_item = QTableWidgetItem(f"{amount:.2f}")
             note_item = QTableWidgetItem(note)
-            recurring_item = QTableWidgetItem("Sim" if is_recurring else "Nao")
+            recurring_item = QTableWidgetItem("Sim" if is_recurring else "Não")
 
             date_item.setFlags(date_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             recurring_item.setFlags(recurring_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -156,12 +156,12 @@ class TransactionsPage(QWidget):
 
         self.table.resizeColumnsToContents()
         self._is_loading = False
-        self._set_status(f"{len(self._rows)} transacoes carregadas.", success=True)
+        self._set_status(f"{len(self._rows)} transações carregadas.", success=True)
 
     def _save_selected_row(self) -> None:
         row_idx = self.table.currentRow()
         if row_idx < 0 or row_idx >= len(self._rows):
-            QMessageBox.warning(self, "Transacoes", "Selecione uma transacao na tabela.")
+            QMessageBox.warning(self, "Transações", "Selecione uma transação na tabela.")
             return
 
         tx = self._rows[row_idx]
@@ -173,7 +173,7 @@ class TransactionsPage(QWidget):
         amount_item = self.table.item(row_idx, 4)
         note_item = self.table.item(row_idx, 5)
         if not all([description_item, category_item, payer_item, amount_item, note_item]):
-            self._set_status("Linha selecionada esta incompleta para salvar.", success=False)
+            self._set_status("Linha selecionada está incompleta para salvar.", success=False)
             return
 
         new_description = description_item.text().strip()
@@ -183,27 +183,27 @@ class TransactionsPage(QWidget):
         new_note = note_item.text().strip()
 
         if not new_description:
-            self._set_status("Descricao nao pode ficar vazia.", success=False)
+            self._set_status("Descrição não pode ficar vazia.", success=False)
             return
 
         if not new_category:
-            self._set_status("Categoria nao pode ficar vazia.", success=False)
+            self._set_status("Categoria não pode ficar vazia.", success=False)
             return
 
         if new_category not in ALLOWED_CATEGORIES:
             allowed = ", ".join(ALLOWED_CATEGORIES)
-            self._set_status(f"Categoria invalida. Use: {allowed}", success=False)
+            self._set_status(f"Categoria inválida. Use: {allowed}", success=False)
             return
 
         if new_payer and new_payer not in ALLOWED_PAYERS:
             allowed = ", ".join(ALLOWED_PAYERS)
-            self._set_status(f"Pagador invalido. Use vazio ou: {allowed}", success=False)
+            self._set_status(f"Pagador inválido. Use vazio ou: {allowed}", success=False)
             return
 
         try:
             new_amount = self._parse_amount(amount_text)
         except ValueError:
-            self._set_status("Valor invalido. Use numero como 123.45 ou -54,90.", success=False)
+            self._set_status("Valor inválido. Use número como 123.45 ou -54,90.", success=False)
             return
 
         try:
@@ -215,16 +215,16 @@ class TransactionsPage(QWidget):
                 amount=new_amount,
                 note=new_note or None,
             )
-            self._set_status(f"Transacao {tx_id} atualizada e aprendida.", success=True)
+            self._set_status(f"Transação {tx_id} atualizada e aprendida.", success=True)
             self.refresh()
             self.data_changed.emit()
         except Exception as exc:
-            self._set_status(f"Erro ao atualizar transacao {tx_id}: {exc}", success=False)
+            self._set_status(f"Erro ao atualizar transação {tx_id}: {exc}", success=False)
 
     def _mark_selected_recurring(self) -> None:
         row_idx = self.table.currentRow()
         if row_idx < 0 or row_idx >= len(self._rows):
-            QMessageBox.warning(self, "Transacoes", "Selecione uma transacao na tabela.")
+            QMessageBox.warning(self, "Transações", "Selecione uma transação na tabela.")
             return
 
         tx = self._rows[row_idx]
@@ -233,11 +233,11 @@ class TransactionsPage(QWidget):
 
         try:
             self.controller.mark_recurring(tx_id=tx_id, group_name=group_name)
-            self._set_status(f"Transacao {tx_id} marcada como recorrente.", success=True)
+            self._set_status(f"Transação {tx_id} marcada como recorrente.", success=True)
             self.refresh()
             self.data_changed.emit()
         except Exception as exc:
-            self._set_status(f"Erro ao marcar recorrencia: {exc}", success=False)
+            self._set_status(f"Erro ao marcar recorrência: {exc}", success=False)
 
     def _add_manual_transaction(self) -> None:
         qdate = self.manual_date.date()
@@ -287,4 +287,3 @@ class TransactionsPage(QWidget):
             return dt.strftime("%d/%m/%Y")
         except Exception:
             return date_text
-

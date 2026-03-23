@@ -50,11 +50,11 @@ class RulesPage(QWidget):
         self.table.setHorizontalHeaderLabels(
             [
                 "ID",
-                "Descricao contem",
-                "Valor minimo",
-                "Valor maximo",
+                "Descrição contém",
+                "Valor mínimo",
+                "Valor máximo",
                 "Recorrente",
-                "Categoria destino",
+                "Categoria de destino",
             ]
         )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -69,19 +69,19 @@ class RulesPage(QWidget):
         self.amount_min_input = QLineEdit()
         self.amount_max_input = QLineEdit()
         self.recurring_combo = QComboBox()
-        self.recurring_combo.addItems(["Qualquer", "Sim", "Nao"])
+        self.recurring_combo.addItems(["Qualquer", "Sim", "Não"])
         self.category_input = QLineEdit()
         self.create_button = QPushButton("Criar regra")
 
-        create_layout.addWidget(QLabel("Descricao contem"), 0, 0)
+        create_layout.addWidget(QLabel("Descrição contém"), 0, 0)
         create_layout.addWidget(self.description_contains_input, 0, 1)
-        create_layout.addWidget(QLabel("Valor minimo"), 0, 2)
+        create_layout.addWidget(QLabel("Valor mínimo"), 0, 2)
         create_layout.addWidget(self.amount_min_input, 0, 3)
-        create_layout.addWidget(QLabel("Valor maximo"), 1, 0)
+        create_layout.addWidget(QLabel("Valor máximo"), 1, 0)
         create_layout.addWidget(self.amount_max_input, 1, 1)
         create_layout.addWidget(QLabel("Recorrente"), 1, 2)
         create_layout.addWidget(self.recurring_combo, 1, 3)
-        create_layout.addWidget(QLabel("Categoria destino"), 2, 0)
+        create_layout.addWidget(QLabel("Categoria de destino"), 2, 0)
         create_layout.addWidget(self.category_input, 2, 1, 1, 2)
         create_layout.addWidget(self.create_button, 2, 3)
         root.addWidget(create_box)
@@ -155,5 +155,5 @@ class RulesPage(QWidget):
         if value is True:
             return "Sim"
         if value is False:
-            return "Nao"
+            return "Não"
         return "Qualquer"

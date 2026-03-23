@@ -20,9 +20,9 @@ def generate_financial_advice(insight_data: dict) -> str:
     try:
         text = call_ollama(prompt=prompt, system_prompt=system_prompt)
     except LLMClientError:
-        return "Nao foi possivel gerar conselho financeiro no momento."
+        return "Não foi possível gerar conselho financeiro no momento."
 
     if not text.strip():
-        return "Nao foi possivel gerar conselho financeiro no momento."
+        return "Não foi possível gerar conselho financeiro no momento."
 
     return text.strip()

@@ -12,7 +12,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.ui.main_window import MainWindow
-from db import init_db
+from core.db import init_db
 
 
 def _runtime_dir() -> Path:

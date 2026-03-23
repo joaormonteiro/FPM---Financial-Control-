@@ -1,9 +1,11 @@
-﻿import csv
-import re
+from collections import defaultdict
+import csv
 from datetime import datetime
+import re
 
 from ai.ai_engine import enhance_transaction
-from models import Transaction
+from core.import_uid import build_import_uid, canonical_source_name
+from core.models import Transaction
 
 DATE_RE = re.compile(r"\d{2}/\d{2}/\d{4}")
 
@@ -28,13 +30,15 @@ def _read_lines_with_fallback(path: str) -> list[str]:
             return f.readlines()
 
 
-def parse_inter_csv(path: str):
+def parse_inter_csv(path: str, source_name: str | None = None):
     """
     Faz o parsing de um CSV exportado do Banco Inter e converte
     cada linha valida em um objeto Transaction.
     """
     transactions = []
     lines = _read_lines_with_fallback(path)
+    occurrence_map: dict[tuple[str, str, str, str, str], int] = defaultdict(int)
+    source_label = canonical_source_name(source_name or path)
 
     header_index = None
     for i in range(len(lines) - 1):
@@ -46,7 +50,7 @@ def parse_inter_csv(path: str):
 
     if header_index is None:
         raise Exception(
-            "Nao foi possivel detectar a tabela de transacoes no CSV do Inter."
+            "Não foi possível detectar a tabela de transações no CSV do Inter."
         )
 
     reader = csv.DictReader(lines[header_index:], delimiter=";")
@@ -76,6 +80,24 @@ def parse_inter_csv(path: str):
         )
 
         ttype = "debit" if amount < 0 else "credit"
+        tx_date = datetime.strptime(date_str, "%d/%m/%Y").date()
+        key = (
+            tx_date.isoformat(),
+            raw_description,
+            f"{float(amount):.2f}",
+            "Inter",
+            ttype,
+        )
+        occurrence_map[key] += 1
+        import_uid = build_import_uid(
+            source_name=source_label,
+            date_iso=key[0],
+            raw_description=raw_description,
+            amount=float(amount),
+            account="Inter",
+            tx_type=ttype,
+            occurrence=occurrence_map[key],
+        )
 
         (
             cleaned_description,
@@ -87,7 +109,7 @@ def parse_inter_csv(path: str):
         ) = enhance_transaction(raw_description, amount)
 
         t = Transaction(
-            date=datetime.strptime(date_str, "%d/%m/%Y").date(),
+            date=tx_date,
             raw_description=raw_description,
             description=raw_description,
             amount=amount,
@@ -95,7 +117,8 @@ def parse_inter_csv(path: str):
             type=ttype,
             category=category,
             payer=payer,
-            source_file=path,
+            source_file=source_label,
+            import_uid=import_uid,
             normalized_description=normalized_description,
             cleaned_description=cleaned_description,
             classification_source=classification_source,

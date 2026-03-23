@@ -47,7 +47,7 @@ class MainWindow(QMainWindow):
         self._pages = [
             ("Dashboard", self.dashboard_page),
             ("Importar Extrato", self.import_page),
-            ("Transacoes", self.transactions_page),
+            ("Transações", self.transactions_page),
             ("Regras", self.rules_page),
             ("Chat Financeiro", self.chat_page),
         ]

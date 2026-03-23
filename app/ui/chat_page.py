@@ -32,7 +32,7 @@ class ChatPage(QWidget):
 
         self.chat_output = QTextEdit()
         self.chat_output.setReadOnly(True)
-        self.chat_output.setPlaceholderText("Pergunte sobre seus gastos, categorias e recorrencias.")
+        self.chat_output.setPlaceholderText("Pergunte sobre seus gastos, categorias e recorrências.")
         root.addWidget(self.chat_output, stretch=1)
 
         input_row = QHBoxLayout()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ai.recurrence_engine import detect_recurring_transactions
-from db import connect, insert_transaction
+from core.db import connect, insert_transaction
 from importers.inter_csv import parse_inter_csv
 
 
@@ -12,8 +12,10 @@ class ImportController:
 
         try:
             transactions = parse_inter_csv(file_path)
+            inserted = 0
             for transaction in transactions:
-                insert_transaction(transaction)
+                if insert_transaction(transaction):
+                    inserted += 1
 
             conn = connect()
             try:
@@ -21,7 +23,11 @@ class ImportController:
             finally:
                 conn.close()
 
-            total = len(transactions)
-            return True, f"Importacao concluida: {total} transacoes adicionadas.", total
+            skipped = len(transactions) - inserted
+            return (
+                True,
+                f"Importação concluída: {inserted} transações adicionadas, {skipped} ignoradas (duplicadas).",
+                inserted,
+            )
         except Exception as exc:
-            return False, f"Erro na importacao: {exc}", 0
+            return False, f"Erro na importação: {exc}", 0

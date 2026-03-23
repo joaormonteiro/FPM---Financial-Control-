@@ -4,8 +4,8 @@ from datetime import date, datetime
 from sqlite3 import Row
 
 from ai.description_normalizer import normalize_description
-from db import connect, insert_transaction, set_transaction_recurring, update_transaction_manual
-from models import Transaction
+from core.db import connect, insert_transaction, set_transaction_recurring, update_transaction_manual
+from core.models import Transaction
 
 
 class TransactionController:
@@ -79,7 +79,7 @@ class TransactionController:
         try:
             clean_description = (description or "").strip()
             if not clean_description:
-                return False, "Descricao e obrigatoria."
+                return False, "Descrição é obrigatória."
 
             tx_type = "debit" if float(amount) < 0 else "credit"
             tx = Transaction(
@@ -113,6 +113,6 @@ class TransactionController:
                 if row and row[0] is not None:
                     set_transaction_recurring(int(row[0]), f"manual_{int(row[0])}")
 
-            return True, "Lancamento manual adicionado com sucesso."
+            return True, "Lançamento manual adicionado com sucesso."
         except Exception as exc:
-            return False, f"Erro ao adicionar lancamento manual: {exc}"
+            return False, f"Erro ao adicionar lançamento manual: {exc}"

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ai.financial_advisor import generate_financial_advice
-from db import connect
+from core.db import connect
 from services.insight_service import generate_monthly_insights
 from services.query_service import get_total_by_category
 
@@ -55,6 +55,8 @@ class DashboardPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._latest_insights: dict | None = None
+        self._active_month: int | None = None
+        self._active_year: int | None = None
         self._investment_re = re.compile(r"\bAplicacao\b|\bCDB\b|\bInvest", re.IGNORECASE)
         self._build_ui()
         self.refresh()
@@ -72,7 +74,7 @@ class DashboardPage(QWidget):
         self.parents_paid_label = QLabel("R$ 0,00")
         self.total_received_label = QLabel("R$ 0,00")
 
-        metric_grid.addWidget(self._metric_box("Total Gasto no Mes", self.total_spent_label), 0, 0)
+        metric_grid.addWidget(self._metric_box("Total Gasto no Mês", self.total_spent_label), 0, 0)
         metric_grid.addWidget(self._metric_box("Pago pelos Pais", self.parents_paid_label), 0, 1)
         metric_grid.addWidget(self._metric_box("Total Recebido", self.total_received_label), 0, 2)
 
@@ -80,13 +82,15 @@ class DashboardPage(QWidget):
 
         actions = QHBoxLayout()
         self.refresh_button = QPushButton("Atualizar Dashboard")
-        self.analyze_button = QPushButton("Analisar meu mes")
+        self.analyze_button = QPushButton("Analisar meu mês")
         self.advice_button = QPushButton("Onde posso economizar?")
         actions.addWidget(self.refresh_button)
         actions.addWidget(self.analyze_button)
         actions.addWidget(self.advice_button)
         actions.addStretch(1)
         root.addLayout(actions)
+        self.period_label = QLabel("")
+        root.addWidget(self.period_label)
 
         chart_box = QGroupBox("Gastos por Categoria")
         chart_layout = QVBoxLayout(chart_box)
@@ -107,10 +111,10 @@ class DashboardPage(QWidget):
         insights_layout = QHBoxLayout()
         self.insights_text = QPlainTextEdit()
         self.insights_text.setReadOnly(True)
-        self.insights_text.setPlaceholderText("Insights mensais aparecerao aqui.")
+        self.insights_text.setPlaceholderText("Insights mensais aparecerão aqui.")
         self.advice_text = QPlainTextEdit()
         self.advice_text.setReadOnly(True)
-        self.advice_text.setPlaceholderText("Conselho financeiro aparecera aqui.")
+        self.advice_text.setPlaceholderText("Conselho financeiro aparecerá aqui.")
 
         insights_group = QGroupBox("Insights Mensais")
         insights_group_layout = QVBoxLayout(insights_group)
@@ -137,8 +141,13 @@ class DashboardPage(QWidget):
 
     def refresh(self) -> None:
         now = datetime.now()
-        start_date, end_date = _month_bounds(now)
+        month, year = self._resolve_reference_period(now)
+        self._active_month = month
+        self._active_year = year
+
+        start_date, end_date = _month_bounds(datetime(year, month, 1))
         spent, parents_paid, received = self._compute_month_metrics(start_date, end_date)
+        self.period_label.setText(f"Período em análise: {month:02d}/{year}")
 
         self.total_spent_label.setText(_format_brl(abs(spent)))
         self.parents_paid_label.setText(_format_brl(abs(parents_paid)))
@@ -151,6 +160,33 @@ class DashboardPage(QWidget):
             if float(total) < 0
         }
         self._update_category_chart(expenses_by_category)
+
+    def _resolve_reference_period(self, now: datetime) -> tuple[int, int]:
+        current_start, current_end = _month_bounds(now)
+        conn = connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM transactions
+            WHERE date >= ? AND date < ?
+            """,
+            (current_start, current_end),
+        )
+        current_count = int(cur.fetchone()[0] or 0)
+        if current_count > 0:
+            conn.close()
+            return now.month, now.year
+
+        cur.execute("SELECT MAX(date) FROM transactions")
+        row = cur.fetchone()
+        conn.close()
+
+        max_date = str(row[0] or "").strip()
+        if len(max_date) >= 7:
+            return int(max_date[5:7]), int(max_date[0:4])
+
+        return now.month, now.year
 
     def _compute_month_metrics(self, start_date: str, end_date: str) -> tuple[float, float, float]:
         conn = connect()
@@ -193,7 +229,7 @@ class DashboardPage(QWidget):
             chart.setTitle("Despesas por categoria")
 
             if not expenses_by_category:
-                chart.setTitle("Despesas por categoria (sem dados no periodo)")
+                chart.setTitle("Despesas por categoria (sem dados no período)")
                 self.chart_view.setChart(chart)
                 return
 
@@ -227,7 +263,7 @@ class DashboardPage(QWidget):
             return
 
         if not expenses_by_category:
-            self.chart_fallback.setPlainText("Sem dados para o periodo atual.")
+            self.chart_fallback.setPlainText("Sem dados para o período atual.")
             return
 
         ordered = sorted(expenses_by_category.items(), key=lambda item: item[1], reverse=True)
@@ -235,8 +271,12 @@ class DashboardPage(QWidget):
         self.chart_fallback.setPlainText("\n".join(lines))
 
     def _generate_insights(self) -> None:
-        now = datetime.now()
-        self._latest_insights = generate_monthly_insights(now.month, now.year)
+        if self._active_month is None or self._active_year is None:
+            self.refresh()
+        if self._active_month is None or self._active_year is None:
+            return
+
+        self._latest_insights = generate_monthly_insights(self._active_month, self._active_year)
         self.insights_text.setPlainText(self._format_insights(self._latest_insights))
 
     def _generate_advice(self) -> None:
@@ -255,8 +295,8 @@ class DashboardPage(QWidget):
         small_expenses = insight_data.get("small_expenses", [])
 
         lines = [
-            f"Gastos superfluos no mes: {_format_brl(float(superfluous.get('total_superfluous', 0.0)))}",
-            f"Percentual sobre despesas do mes: {float(superfluous.get('percentage_of_month', 0.0)):.2f}%",
+            f"Gastos supérfluos no mês: {_format_brl(float(superfluous.get('total_superfluous', 0.0)))}",
+            f"Percentual sobre despesas do mês: {float(superfluous.get('percentage_of_month', 0.0)):.2f}%",
             "",
             "Categorias com crescimento acima de 15%:",
         ]
@@ -279,6 +319,6 @@ class DashboardPage(QWidget):
                     f"- {item.get('category')}: {_format_brl(float(item.get('small_expense_total', 0.0)))}"
                 )
         else:
-            lines.append("- Nao ha pequenas despesas acumuladas no periodo.")
+            lines.append("- Não há pequenas despesas acumuladas no período.")
 
         return "\n".join(lines)
