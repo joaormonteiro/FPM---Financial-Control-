@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui.chat_page import ChatPage
 from app.ui.dashboard_page import DashboardPage
 from app.ui.import_page import ImportPage
 from app.ui.rules_page import RulesPage
@@ -42,14 +41,12 @@ class MainWindow(QMainWindow):
         self.import_page = ImportPage()
         self.transactions_page = TransactionsPage()
         self.rules_page = RulesPage()
-        self.chat_page = ChatPage()
 
         self._pages = [
             ("Dashboard", self.dashboard_page),
             ("Importar Extrato", self.import_page),
             ("Transações", self.transactions_page),
             ("Regras", self.rules_page),
-            ("Chat Financeiro", self.chat_page),
         ]
 
         for title, page in self._pages:

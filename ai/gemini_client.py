@@ -14,6 +14,9 @@ ALLOWED_CATEGORIES = {
     "educacao",
     "moradia",
     "assinaturas",
+    "saude",
+    "investimentos",
+    "entrada",
     "outros",
 }
 ALLOWED_PAYERS = {"eu", "pais"}
@@ -44,69 +47,77 @@ def _extract_json_object(text: str) -> dict[str, Any]:
 
     match = _JSON_BLOCK_RE.search(raw)
     if not match:
-        raise GeminiClientError("Gemini nao retornou JSON valido.")
+        raise GeminiClientError("Gemini não retornou JSON válido.")
 
     try:
         parsed = json.loads(match.group(0))
     except json.JSONDecodeError as exc:
-        raise GeminiClientError("Gemini retornou JSON invalido.") from exc
+        raise GeminiClientError("Gemini retornou JSON inválido.") from exc
 
     if not isinstance(parsed, dict):
         raise GeminiClientError("Gemini retornou JSON fora do formato esperado.")
     return parsed
 
 
-def _build_prompt(descricao_original: str) -> str:
+def _build_prompt(descricao_original: str, amount: float, tx_kind: str) -> str:
     return f"""
-Voce e um classificador de transacoes financeiras pessoais.
+Você é um assistente financeiro.
 
-Recebera a descricao de uma transacao bancaria.
+Receberá:
+- descrição original da transação
+- valor
+- tipo (entrada ou saida)
 
-Sua tarefa e:
+Tarefa:
+1) sugerir uma descrição final curta e clara
+2) sugerir categoria
+3) sugerir pagador (eu ou pais)
 
-1) gerar uma descricao curta e clara
-2) classificar a categoria
-3) sugerir quem pagou
-
-Categorias possiveis:
+Categorias possíveis:
 alimentacao
 lazer
 transporte
 educacao
 moradia
 assinaturas
+saude
+investimentos
+entrada
 outros
 
 Regras:
+- não inventar dados
+- se não tiver informação suficiente, usar categoria outros
+- responder SOMENTE em JSON
 
-- se nao tiver informacao suficiente -> categoria = outros
-- nao inventar dados
-- descricao curta e objetiva
-
-Formato da resposta JSON:
-
+Formato JSON obrigatório:
 {{
- "descricao": "...",
- "categoria": "...",
- "pagador": "eu | pais"
+  "descricao": "...",
+  "categoria": "...",
+  "pagador": "eu|pais"
 }}
 
-Descricao da transacao:
-
-{descricao_original}
+Dados:
+descricao_original: {descricao_original}
+valor: {amount:.2f}
+tipo: {tx_kind}
 """.strip()
 
 
-def classify_with_gemini(descricao_original: str) -> dict[str, str]:
+def classify_with_gemini(
+    descricao_original: str,
+    amount: float = 0.0,
+    tx_kind: str = "saida",
+) -> dict[str, str]:
     api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
     if not api_key:
-        raise GeminiClientError("GEMINI_API_KEY nao configurada.")
+        raise GeminiClientError("GEMINI_API_KEY não configurada.")
 
     model = (os.getenv("GEMINI_MODEL") or _DEFAULT_MODEL).strip()
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
     payload = {
-        "contents": [{"parts": [{"text": _build_prompt(descricao_original)}]}],
+        "contents": [{"parts": [{"text": _build_prompt(descricao_original, float(amount), tx_kind)}]}],
         "generationConfig": {
             "temperature": 0.1,
             "topK": 1,
@@ -129,11 +140,11 @@ def classify_with_gemini(descricao_original: str) -> dict[str, str]:
     try:
         data = resp.json()
     except ValueError as exc:
-        raise GeminiClientError("Gemini retornou resposta nao JSON.") from exc
+        raise GeminiClientError("Gemini retornou resposta não JSON.") from exc
 
     candidates = data.get("candidates") or []
     if not candidates:
-        raise GeminiClientError("Gemini nao retornou candidatos.")
+        raise GeminiClientError("Gemini não retornou candidatos.")
 
     parts = (
         candidates[0].get("content", {}).get("parts", [])

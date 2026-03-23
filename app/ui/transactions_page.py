@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -22,7 +24,58 @@ from PySide6.QtWidgets import (
 )
 
 from app.controllers.transaction_controller import TransactionController
-from core.models import ALLOWED_CATEGORIES, ALLOWED_PAYERS
+from core.models import ALLOWED_PAYERS
+
+CATEGORY_OPTIONS: list[tuple[str, str]] = [
+    ("alimentacao", "Alimentação"),
+    ("transporte", "Transporte"),
+    ("lazer", "Lazer"),
+    ("assinaturas", "Assinaturas"),
+    ("saude", "Saúde"),
+    ("investimentos", "Investimentos"),
+    ("entrada", "Entrada"),
+    ("outros", "Outros"),
+]
+CATEGORY_KEYS = {key for key, _ in CATEGORY_OPTIONS}
+
+
+def _category_key_to_label(value: str) -> str:
+    key = (value or "").strip().lower()
+    for cat_key, label in CATEGORY_OPTIONS:
+        if cat_key == key:
+            return label
+    return "Outros"
+
+
+def _label_to_category_key(value: str) -> str | None:
+    text = (value or "").strip().lower()
+    for cat_key, label in CATEGORY_OPTIONS:
+        if text == label.lower():
+            return cat_key
+    if text in CATEGORY_KEYS:
+        return text
+    return None
+
+
+class CategoryDelegate(QStyledItemDelegate):
+    def createEditor(self, parent, option, index):
+        editor = QComboBox(parent)
+        for _, label in CATEGORY_OPTIONS:
+            editor.addItem(label)
+        return editor
+
+    def setEditorData(self, editor, index):
+        current_label = str(index.data() or "").strip()
+        selected = current_label if current_label else "Outros"
+        pos = editor.findText(selected)
+        if pos < 0:
+            pos = editor.findText(_category_key_to_label(current_label))
+        if pos < 0:
+            pos = editor.findText("Outros")
+        editor.setCurrentIndex(max(pos, 0))
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.currentText())
 
 
 class TransactionsPage(QWidget):
@@ -63,6 +116,7 @@ class TransactionsPage(QWidget):
         )
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
+        self.table.setItemDelegateForColumn(2, CategoryDelegate(self.table))
         root.addWidget(self.table, stretch=1)
 
         actions = QHBoxLayout()
@@ -94,7 +148,8 @@ class TransactionsPage(QWidget):
         self.manual_amount.setDecimals(2)
         self.manual_amount.setSingleStep(1.0)
         self.manual_category = QComboBox()
-        self.manual_category.addItems(ALLOWED_CATEGORIES)
+        for _, label in CATEGORY_OPTIONS:
+            self.manual_category.addItem(label)
         self.manual_recurring = QCheckBox("Recorrente")
         self.manual_add_button = QPushButton("Adicionar lançamento")
 
@@ -128,8 +183,9 @@ class TransactionsPage(QWidget):
 
         for row_idx, tx in enumerate(self._rows):
             date_text = self._format_date(str(tx.get("date") or ""))
-            description = str(tx.get("description") or "")
-            category = str(tx.get("category") or "outros")
+            description = self._capitalize_first(str(tx.get("description") or ""))
+            raw_description = str(tx.get("raw_description") or "")
+            category = _category_key_to_label(str(tx.get("category") or "outros"))
             payer = str(tx.get("payer") or "")
             amount = float(tx.get("amount") or 0.0)
             note = str(tx.get("note") or "")
@@ -137,6 +193,8 @@ class TransactionsPage(QWidget):
 
             date_item = QTableWidgetItem(date_text)
             desc_item = QTableWidgetItem(description)
+            if raw_description:
+                desc_item.setToolTip(f"(orig: {raw_description})")
             category_item = QTableWidgetItem(category)
             payer_item = QTableWidgetItem(payer)
             amount_item = QTableWidgetItem(f"{amount:.2f}")
@@ -145,6 +203,13 @@ class TransactionsPage(QWidget):
 
             date_item.setFlags(date_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             recurring_item.setFlags(recurring_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            amount_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            if amount < 0:
+                amount_item.setBackground(QColor("#ffd6d6"))
+                amount_item.setForeground(QColor("#8a1f11"))
+            else:
+                amount_item.setBackground(QColor("#d6ffd6"))
+                amount_item.setForeground(QColor("#136f1f"))
 
             self.table.setItem(row_idx, 0, date_item)
             self.table.setItem(row_idx, 1, desc_item)
@@ -176,8 +241,8 @@ class TransactionsPage(QWidget):
             self._set_status("Linha selecionada está incompleta para salvar.", success=False)
             return
 
-        new_description = description_item.text().strip()
-        new_category = category_item.text().strip().lower()
+        new_description = self._capitalize_first(description_item.text().strip())
+        new_category = _label_to_category_key(category_item.text().strip())
         new_payer = payer_item.text().strip().lower()
         amount_text = amount_item.text().strip()
         new_note = note_item.text().strip()
@@ -187,12 +252,11 @@ class TransactionsPage(QWidget):
             return
 
         if not new_category:
-            self._set_status("Categoria não pode ficar vazia.", success=False)
+            self._set_status("Selecione uma categoria válida.", success=False)
             return
 
-        if new_category not in ALLOWED_CATEGORIES:
-            allowed = ", ".join(ALLOWED_CATEGORIES)
-            self._set_status(f"Categoria inválida. Use: {allowed}", success=False)
+        if new_category not in CATEGORY_KEYS:
+            self._set_status("Categoria inválida selecionada.", success=False)
             return
 
         if new_payer and new_payer not in ALLOWED_PAYERS:
@@ -242,9 +306,10 @@ class TransactionsPage(QWidget):
     def _add_manual_transaction(self) -> None:
         qdate = self.manual_date.date()
         tx_date = datetime(qdate.year(), qdate.month(), qdate.day()).date()
-        description = self.manual_description.text()
+        description = self._capitalize_first(self.manual_description.text())
         amount = float(self.manual_amount.value())
-        category = self.manual_category.currentText()
+        selected_label = self.manual_category.currentText()
+        category = _label_to_category_key(selected_label) or "outros"
         is_recurring = self.manual_recurring.isChecked()
 
         ok, message = self.controller.add_manual_transaction(
@@ -287,3 +352,10 @@ class TransactionsPage(QWidget):
             return dt.strftime("%d/%m/%Y")
         except Exception:
             return date_text
+
+    @staticmethod
+    def _capitalize_first(value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            return text
+        return text[:1].upper() + text[1:]

@@ -4,6 +4,7 @@ import unicodedata
 from datetime import datetime
 
 from core.import_uid import build_import_uid, canonical_source_name
+from ai.custom_rule_engine import upsert_rule_from_manual_edit
 from ai.description_normalizer import normalize_description
 from ai.learned_patterns import ensure_learned_patterns_table, upsert_learned_pattern
 from core.models import (
@@ -54,9 +55,12 @@ _LEGACY_CATEGORY_MAP = {
     "moradia": "moradia",
     "assinatura": "assinaturas",
     "assinaturas": "assinaturas",
+    "saude": "saude",
+    "investimento": "investimentos",
+    "investimentos": "investimentos",
+    "entrada": "entrada",
     "outro": "outros",
     "outros": "outros",
-    "saude": "outros",
 }
 
 _LEGACY_PAYER_MAP = {
@@ -111,6 +115,13 @@ def _normalize_payer(value: str | None) -> str | None:
     if normalized in ALLOWED_PAYERS:
         return normalized
     return None
+
+
+def _capitalize_first(value: str | None) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return text
+    return text[:1].upper() + text[1:]
 
 
 def _deduplicate_reimported_rows(conn: sqlite3.Connection) -> int:
@@ -401,7 +412,11 @@ def insert_transaction(t: Transaction) -> bool:
             return False
 
     imported_at = t.imported_at or datetime.now().isoformat()
-    cleaned_description = (t.cleaned_description or t.description_ai or t.description or raw_description).strip()
+    cleaned_description = _capitalize_first(
+        (t.cleaned_description or t.description_ai or t.description or raw_description).strip()
+    )
+    description = _capitalize_first((t.description or raw_description).strip())
+    description_ai = _capitalize_first((t.description_ai or cleaned_description or description).strip())
     normalized_description = (t.normalized_description or normalize_description(raw_description)).strip()
     note = (t.note or "").strip()
     source_file = canonical_source_name(t.source_file) if t.source_file else ""
@@ -432,7 +447,7 @@ def insert_transaction(t: Transaction) -> bool:
         """,
         (
             t.date.isoformat(),
-            t.description,
+            description,
             t.amount,
             t.account,
             t.type,
@@ -442,7 +457,7 @@ def insert_transaction(t: Transaction) -> bool:
             source_file,
             import_uid,
             imported_at,
-            t.description_ai,
+            description_ai,
             category_ai,
             t.ai_confidence,
             ai_updated_at,
@@ -490,6 +505,7 @@ def update_transaction_manual(
     final_description = (description if description is not None else current_description or raw_description or "").strip()
     if not final_description:
         final_description = str(raw_description or "").strip()
+    final_description = _capitalize_first(final_description)
 
     final_category = _normalize_category(category if category is not None else current_category) or "outros"
     final_payer = _normalize_payer(payer if payer is not None else current_payer)
@@ -539,6 +555,11 @@ def update_transaction_manual(
         categoria=final_category,
         pagador=final_payer,
         conn=conn,
+    )
+    upsert_rule_from_manual_edit(
+        original_description=str(raw_description or final_description or ""),
+        description_final=final_description,
+        category=final_category,
     )
 
     conn.commit()

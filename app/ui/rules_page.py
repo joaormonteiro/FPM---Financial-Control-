@@ -18,6 +18,33 @@ from PySide6.QtWidgets import (
 
 from app.controllers.rules_controller import RulesController
 
+CATEGORY_OPTIONS: list[tuple[str, str]] = [
+    ("alimentacao", "Alimentação"),
+    ("transporte", "Transporte"),
+    ("lazer", "Lazer"),
+    ("assinaturas", "Assinaturas"),
+    ("saude", "Saúde"),
+    ("investimentos", "Investimentos"),
+    ("entrada", "Entrada"),
+    ("outros", "Outros"),
+]
+
+
+def _category_key_to_label(value: str) -> str:
+    key = (value or "").strip().lower()
+    for cat_key, label in CATEGORY_OPTIONS:
+        if cat_key == key:
+            return label
+    return "Outros"
+
+
+def _label_to_category_key(value: str) -> str:
+    text = (value or "").strip().lower()
+    for cat_key, label in CATEGORY_OPTIONS:
+        if text == label.lower():
+            return cat_key
+    return "outros"
+
 
 class RulesPage(QWidget):
     data_changed = Signal()
@@ -35,7 +62,7 @@ class RulesPage(QWidget):
         root.setSpacing(10)
 
         header = QHBoxLayout()
-        title = QLabel("Regras Personalizadas")
+        title = QLabel("Gerenciador de Regras")
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         self.refresh_button = QPushButton("Atualizar")
         self.delete_button = QPushButton("Excluir selecionada")
@@ -46,16 +73,9 @@ class RulesPage(QWidget):
         root.addLayout(header)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(
-            [
-                "ID",
-                "Descrição contém",
-                "Valor mínimo",
-                "Valor máximo",
-                "Recorrente",
-                "Categoria de destino",
-            ]
+            ["ID", "Keywords", "Descrição Final", "Categoria", "Prioridade"]
         )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -65,25 +85,26 @@ class RulesPage(QWidget):
 
         create_box = QGroupBox("Criar nova regra")
         create_layout = QGridLayout(create_box)
-        self.description_contains_input = QLineEdit()
-        self.amount_min_input = QLineEdit()
-        self.amount_max_input = QLineEdit()
-        self.recurring_combo = QComboBox()
-        self.recurring_combo.addItems(["Qualquer", "Sim", "Não"])
-        self.category_input = QLineEdit()
+        self.keywords_input = QLineEdit()
+        self.keywords_input.setPlaceholderText("Ex: pix, gustavo, oliveira")
+        self.description_input = QLineEdit()
+        self.description_input.setPlaceholderText("Descrição final")
+        self.category_combo = QComboBox()
+        for _, label in CATEGORY_OPTIONS:
+            self.category_combo.addItem(label)
+        self.priority_input = QLineEdit()
+        self.priority_input.setPlaceholderText("100")
         self.create_button = QPushButton("Criar regra")
 
-        create_layout.addWidget(QLabel("Descrição contém"), 0, 0)
-        create_layout.addWidget(self.description_contains_input, 0, 1)
-        create_layout.addWidget(QLabel("Valor mínimo"), 0, 2)
-        create_layout.addWidget(self.amount_min_input, 0, 3)
-        create_layout.addWidget(QLabel("Valor máximo"), 1, 0)
-        create_layout.addWidget(self.amount_max_input, 1, 1)
-        create_layout.addWidget(QLabel("Recorrente"), 1, 2)
-        create_layout.addWidget(self.recurring_combo, 1, 3)
-        create_layout.addWidget(QLabel("Categoria de destino"), 2, 0)
-        create_layout.addWidget(self.category_input, 2, 1, 1, 2)
-        create_layout.addWidget(self.create_button, 2, 3)
+        create_layout.addWidget(QLabel("Keywords (separadas por vírgula)"), 0, 0)
+        create_layout.addWidget(self.keywords_input, 0, 1, 1, 3)
+        create_layout.addWidget(QLabel("Descrição final"), 1, 0)
+        create_layout.addWidget(self.description_input, 1, 1, 1, 3)
+        create_layout.addWidget(QLabel("Categoria"), 2, 0)
+        create_layout.addWidget(self.category_combo, 2, 1)
+        create_layout.addWidget(QLabel("Prioridade"), 2, 2)
+        create_layout.addWidget(self.priority_input, 2, 3)
+        create_layout.addWidget(self.create_button, 3, 3)
         root.addWidget(create_box)
 
         self.status_label = QLabel("")
@@ -100,11 +121,10 @@ class RulesPage(QWidget):
         for row_idx, rule in enumerate(self._rules):
             values = [
                 str(rule.get("id") or ""),
-                str(rule.get("description_contains") or ""),
-                "" if rule.get("amount_min") is None else str(rule.get("amount_min")),
-                "" if rule.get("amount_max") is None else str(rule.get("amount_max")),
-                self._format_recurring(rule.get("is_recurring")),
-                str(rule.get("set_category") or ""),
+                ", ".join(rule.get("keywords") or []),
+                str(rule.get("description_final") or ""),
+                _category_key_to_label(str(rule.get("category") or "")),
+                str(rule.get("priority") or ""),
             ]
             for col_idx, value in enumerate(values):
                 self.table.setItem(row_idx, col_idx, QTableWidgetItem(value))
@@ -114,20 +134,18 @@ class RulesPage(QWidget):
 
     def _create_rule(self) -> None:
         ok, message = self.controller.create_rule(
-            description_contains=self.description_contains_input.text(),
-            amount_min_text=self.amount_min_input.text(),
-            amount_max_text=self.amount_max_input.text(),
-            recurring_option=self.recurring_combo.currentText(),
-            set_category=self.category_input.text(),
+            keywords_text=self.keywords_input.text(),
+            description_final=self.description_input.text(),
+            category=_label_to_category_key(self.category_combo.currentText()),
+            priority_text=self.priority_input.text(),
         )
         self._set_status(message, success=ok)
 
         if ok:
-            self.description_contains_input.clear()
-            self.amount_min_input.clear()
-            self.amount_max_input.clear()
-            self.category_input.clear()
-            self.recurring_combo.setCurrentIndex(0)
+            self.keywords_input.clear()
+            self.description_input.clear()
+            self.priority_input.clear()
+            self.category_combo.setCurrentIndex(0)
             self.refresh()
             self.data_changed.emit()
 
@@ -149,11 +167,3 @@ class RulesPage(QWidget):
         color = "#136f1f" if success else "#8a1f11"
         self.status_label.setStyleSheet(f"color: {color}; font-weight: 600;")
         self.status_label.setText(message)
-
-    @staticmethod
-    def _format_recurring(value: object) -> str:
-        if value is True:
-            return "Sim"
-        if value is False:
-            return "Não"
-        return "Qualquer"

@@ -20,6 +20,9 @@ ALLOWED_CATEGORIES = [
     "educacao",
     "moradia",
     "assinaturas",
+    "saude",
+    "investimentos",
+    "entrada",
     "outros",
 ]
 

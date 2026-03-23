@@ -99,6 +99,10 @@ def parse_inter_csv(path: str, source_name: str | None = None):
             occurrence=occurrence_map[key],
         )
 
+        enhanced = enhance_transaction(raw_description, amount, tx_type=ttype)
+        if enhanced is None:
+            continue
+
         (
             cleaned_description,
             category,
@@ -106,7 +110,7 @@ def parse_inter_csv(path: str, source_name: str | None = None):
             confidence,
             classification_source,
             normalized_description,
-        ) = enhance_transaction(raw_description, amount)
+        ) = enhanced
 
         t = Transaction(
             date=tx_date,

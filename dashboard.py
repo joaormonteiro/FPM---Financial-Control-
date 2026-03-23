@@ -1,14 +1,12 @@
 ﻿import os
 import sqlite3
 import tempfile
-import uuid
 from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
-from ai.chat_controller import handle_user_question
-from ai.custom_rule_engine import add_custom_rule, delete_custom_rule, load_custom_rules
+from ai.custom_rule_engine import create_description_rule, delete_custom_rule, list_rules_for_ui
 from ai.description_normalizer import normalize_description
 from ai.financial_advisor import generate_financial_advice
 from ai.recurrence_engine import detect_recurring_transactions
@@ -21,12 +19,39 @@ from core.db import (
 )
 from core.settings import DB_PATH
 from importers.inter_csv import parse_inter_csv
-from core.models import ALLOWED_CATEGORIES, ALLOWED_PAYERS, Transaction
+from core.models import ALLOWED_PAYERS, Transaction
 from services.insight_service import generate_monthly_insights
 
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
 
 init_db()
+
+CATEGORY_OPTIONS: list[tuple[str, str]] = [
+    ("alimentacao", "Alimentação"),
+    ("transporte", "Transporte"),
+    ("lazer", "Lazer"),
+    ("assinaturas", "Assinaturas"),
+    ("saude", "Saúde"),
+    ("investimentos", "Investimentos"),
+    ("entrada", "Entrada"),
+    ("outros", "Outros"),
+]
+
+
+def _category_key_to_label(key: str) -> str:
+    value = (key or "").strip().lower()
+    for cat_key, label in CATEGORY_OPTIONS:
+        if cat_key == value:
+            return label
+    return "Outros"
+
+
+def _category_label_to_key(label: str) -> str:
+    text = (label or "").strip().lower()
+    for cat_key, cat_label in CATEGORY_OPTIONS:
+        if cat_label.lower() == text:
+            return cat_key
+    return "outros"
 
 
 def _load_df() -> pd.DataFrame:
@@ -156,7 +181,7 @@ df = _load_df()
 
 st.title("Controle Financeiro")
 
-main_tab, chat_tab = st.tabs(["Painel", "Conversar com suas finanças"])
+main_tab = st.container()
 
 with main_tab:
     st.header("Importar Extrato")
@@ -185,7 +210,8 @@ with main_tab:
             form_date = st.date_input("Data", value=datetime.now().date())
             form_description = st.text_input("Descrição")
             form_amount = st.number_input("Valor", value=0.0, step=0.01, format="%.2f")
-            form_category = st.selectbox("Categoria", options=ALLOWED_CATEGORIES)
+            category_labels = [label for _, label in CATEGORY_OPTIONS]
+            form_category_label = st.selectbox("Categoria", options=category_labels)
             form_recurring = st.checkbox("Recorrente")
             submit_manual = st.form_submit_button("Salvar Gasto")
 
@@ -194,7 +220,7 @@ with main_tab:
                 tx_date=form_date,
                 description=form_description,
                 amount=float(form_amount),
-                category=form_category,
+                category=_category_label_to_key(form_category_label),
                 is_recurring=form_recurring,
             )
             if ok:
@@ -356,9 +382,22 @@ with main_tab:
         table["Categoria"] = table["category"]
 
     if "description_ai" in table.columns:
-        table["Descrição"] = table["description_ai"].fillna(table["description"])
+        main_desc = table["description_ai"].fillna(table["description"]).fillna("")
     else:
-        table["Descrição"] = table["description"]
+        main_desc = table["description"].fillna("")
+    raw_desc = table["raw_description"].fillna(table["description"]).fillna("")
+
+    def _description_with_origin(main_text, raw_text):
+        main = str(main_text or "").strip()
+        raw = str(raw_text or "").strip()
+        if not raw or raw == main:
+            return main
+        return f"{main}\n(orig: {raw})"
+
+    table["Descrição"] = [
+        _description_with_origin(main, raw)
+        for main, raw in zip(main_desc.tolist(), raw_desc.tolist())
+    ]
 
     table["Valor_num"] = table["amount"].astype(float)
 
@@ -403,46 +442,38 @@ with main_tab:
 
     st.markdown("---")
 
-    st.header("Regras e Ajustes")
+    st.header("Gerenciador de Regras")
 
-    rules = load_custom_rules()
+    rules = list_rules_for_ui()
     if rules:
         st.dataframe(pd.DataFrame(rules), use_container_width=True)
     else:
         st.info("Nenhuma regra personalizada cadastrada.")
 
     with st.form("custom_rule_create_form"):
-        description_contains = st.text_input("Descrição contém")
-        amount_min_text = st.text_input("Valor mínimo (opcional)")
-        amount_max_text = st.text_input("Valor máximo (opcional)")
-        recurring_option = st.selectbox("Recorrente", options=["Qualquer", "Sim", "Não"])
-        set_category = st.text_input("Categoria de destino")
+        keywords_text = st.text_input("Keywords (separadas por vírgula)")
+        description_final = st.text_input("Descrição final")
+        category_labels = [label for _, label in CATEGORY_OPTIONS]
+        category_label = st.selectbox("Categoria", options=category_labels)
+        priority_text = st.text_input("Prioridade", value="100")
         create_rule_submitted = st.form_submit_button("Criar regra")
 
     if create_rule_submitted:
-        amount_min = float(amount_min_text) if amount_min_text.strip() else None
-        amount_max = float(amount_max_text) if amount_max_text.strip() else None
-        is_recurring_value = None
-        if recurring_option == "Sim":
-            is_recurring_value = True
-        elif recurring_option == "Não":
-            is_recurring_value = False
-
-        add_custom_rule(
-            {
-                "id": f"rule_{uuid.uuid4().hex[:8]}",
-                "description_contains": description_contains or None,
-                "amount_min": amount_min,
-                "amount_max": amount_max,
-                "is_recurring": is_recurring_value,
-                "set_category": set_category or None,
-            }
-        )
-        st.success("Regra criada com sucesso.")
-        st.rerun()
+        try:
+            create_description_rule(
+                keywords=keywords_text,
+                description_final=description_final,
+                category=_category_label_to_key(category_label),
+                priority=int(priority_text or "100"),
+                source="ui",
+            )
+            st.success("Regra criada com sucesso.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Erro ao criar regra: {exc}")
 
     if rules:
-        rule_ids = [r.get("id") for r in rules if r.get("id")]
+        rule_ids = [str(r.get("id")) for r in rules if r.get("id")]
         selected_rule_id = st.selectbox("Regra para excluir", options=rule_ids)
         if st.button("Excluir regra"):
             delete_custom_rule(selected_rule_id)
@@ -458,17 +489,19 @@ with main_tab:
             st.caption(str(selected_row.get("raw_description") or selected_row.get("description") or ""))
 
             current_category = selected_row.get("category")
-            default_category = current_category if current_category in ALLOWED_CATEGORIES else "outros"
+            default_category = current_category if current_category in {k for k, _ in CATEGORY_OPTIONS} else "outros"
 
             current_payer = selected_row.get("payer")
             payer_choices = ["", *ALLOWED_PAYERS]
             default_payer = current_payer if current_payer in ALLOWED_PAYERS else ""
 
             with st.form("manual_classification_form"):
+                options = [key for key, _ in CATEGORY_OPTIONS]
                 new_category = st.selectbox(
                     "Categoria",
-                    options=ALLOWED_CATEGORIES,
-                    index=ALLOWED_CATEGORIES.index(default_category),
+                    options=options,
+                    format_func=_category_key_to_label,
+                    index=options.index(default_category),
                 )
                 new_payer = st.selectbox(
                     "Pagador",
@@ -497,19 +530,3 @@ with main_tab:
                 )
                 st.success("Transação marcada como recorrente.")
                 st.rerun()
-
-with chat_tab:
-    st.header("Chat Financeiro")
-    question = st.text_input("Pergunta", key="chat_question")
-
-    if st.button("Perguntar", key="chat_ask_button"):
-        user_question = (question or "").strip()
-        if not user_question:
-            st.session_state["chat_answer"] = "Digite uma pergunta."
-        else:
-            st.session_state["chat_answer"] = handle_user_question(user_question)
-
-    answer = st.session_state.get("chat_answer", "")
-    if answer:
-        st.markdown("### Resposta")
-        st.write(answer)
