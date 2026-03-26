@@ -3,7 +3,7 @@
 # Valor: categoria correspondente
 CATEGORIES = {
     # Transporte
-    "UBER": "transporte",
+    "úBER": "transporte",
     "99": "transporte",
     "ONIBUS": "transporte",
     "METRO": "transporte",
