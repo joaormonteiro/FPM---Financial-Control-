@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.controllers.transaction_controller import TransactionController
-from core.models import ALLOWED_PAYERS
+from core.models import ALLOWED_PAYERS, capitalize_first
 
 CATEGORY_OPTIONS: list[tuple[str, str]] = [
     ("alimentacao", "Alimentação"),
@@ -183,7 +183,7 @@ class TransactionsPage(QWidget):
 
         for row_idx, tx in enumerate(self._rows):
             date_text = self._format_date(str(tx.get("date") or ""))
-            description = self._capitalize_first(str(tx.get("description") or ""))
+            description = capitalize_first(str(tx.get("description") or ""))
             raw_description = str(tx.get("raw_description") or "")
             category = _category_key_to_label(str(tx.get("category") or "outros"))
             payer = str(tx.get("payer") or "")
@@ -241,7 +241,7 @@ class TransactionsPage(QWidget):
             self._set_status("Linha selecionada está incompleta para salvar.", success=False)
             return
 
-        new_description = self._capitalize_first(description_item.text().strip())
+        new_description = capitalize_first(description_item.text().strip())
         new_category = _label_to_category_key(category_item.text().strip())
         new_payer = payer_item.text().strip().lower()
         amount_text = amount_item.text().strip()
@@ -306,7 +306,7 @@ class TransactionsPage(QWidget):
     def _add_manual_transaction(self) -> None:
         qdate = self.manual_date.date()
         tx_date = datetime(qdate.year(), qdate.month(), qdate.day()).date()
-        description = self._capitalize_first(self.manual_description.text())
+        description = capitalize_first(self.manual_description.text())
         amount = float(self.manual_amount.value())
         selected_label = self.manual_category.currentText()
         category = _label_to_category_key(selected_label) or "outros"
@@ -353,9 +353,3 @@ class TransactionsPage(QWidget):
         except Exception:
             return date_text
 
-    @staticmethod
-    def _capitalize_first(value: str) -> str:
-        text = (value or "").strip()
-        if not text:
-            return text
-        return text[:1].upper() + text[1:]

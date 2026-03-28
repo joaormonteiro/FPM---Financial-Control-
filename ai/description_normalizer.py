@@ -30,7 +30,7 @@ GENERIC_BANK_WORDS = {
 }
 
 
-def _strip_accents(text: str) -> str:
+def strip_accents(text: str) -> str:
     return (
         unicodedata.normalize("NFKD", text)
         .encode("ascii", "ignore")
@@ -39,7 +39,7 @@ def _strip_accents(text: str) -> str:
 
 
 def normalize_description(description: str) -> str:
-    text = _strip_accents((description or "").strip().lower())
+    text = strip_accents((description or "").strip().lower())
     if not text:
         return ""
 

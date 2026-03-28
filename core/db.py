@@ -12,6 +12,7 @@ from core.models import (
     ALLOWED_CLASSIFICATION_SOURCES,
     ALLOWED_PAYERS,
     Transaction,
+    capitalize_first,
 )
 from core.settings import DB_PATH
 
@@ -116,12 +117,6 @@ def _normalize_payer(value: str | None) -> str | None:
         return normalized
     return None
 
-
-def _capitalize_first(value: str | None) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return text
-    return text[:1].upper() + text[1:]
 
 
 def _deduplicate_reimported_rows(conn: sqlite3.Connection) -> int:
@@ -412,11 +407,11 @@ def insert_transaction(t: Transaction) -> bool:
             return False
 
     imported_at = t.imported_at or datetime.now().isoformat()
-    cleaned_description = _capitalize_first(
+    cleaned_description = capitalize_first(
         (t.cleaned_description or t.description_ai or t.description or raw_description).strip()
     )
-    description = _capitalize_first((t.description or raw_description).strip())
-    description_ai = _capitalize_first((t.description_ai or cleaned_description or description).strip())
+    description = capitalize_first((t.description or raw_description).strip())
+    description_ai = capitalize_first((t.description_ai or cleaned_description or description).strip())
     normalized_description = (t.normalized_description or normalize_description(raw_description)).strip()
     note = (t.note or "").strip()
     source_file = canonical_source_name(t.source_file) if t.source_file else ""
@@ -505,7 +500,7 @@ def update_transaction_manual(
     final_description = (description if description is not None else current_description or raw_description or "").strip()
     if not final_description:
         final_description = str(raw_description or "").strip()
-    final_description = _capitalize_first(final_description)
+    final_description = capitalize_first(final_description)
 
     final_category = _normalize_category(category if category is not None else current_category) or "outros"
     final_payer = _normalize_payer(payer if payer is not None else current_payer)

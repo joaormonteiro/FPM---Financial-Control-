@@ -3,26 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 import re
-import unicodedata
-
 from ai.custom_rule_engine import apply_description_rules
-from ai.description_normalizer import normalize_description
+from ai.description_normalizer import normalize_description, strip_accents
 from ai.gemini_client import GeminiClientError, classify_with_gemini, is_gemini_available
 from ai.learned_patterns import get_learned_pattern
-
-ALLOWED_CATEGORIES = {
-    "alimentacao",
-    "lazer",
-    "transporte",
-    "educacao",
-    "moradia",
-    "assinaturas",
-    "saude",
-    "investimentos",
-    "entrada",
-    "outros",
-}
-ALLOWED_PAYERS = {"eu", "pais"}
+from core.models import ALLOWED_CATEGORIES, ALLOWED_PAYERS, capitalize_first
 
 _SPACES_RE = re.compile(r"\s+")
 _NON_WORD_RE = re.compile(r"[^a-z0-9\s]")
@@ -85,26 +70,12 @@ class DescricaoProcessada:
     matched_rule: bool
 
 
-def _strip_accents(text: str) -> str:
-    return (
-        unicodedata.normalize("NFKD", text)
-        .encode("ascii", "ignore")
-        .decode("ascii")
-    )
-
-
 def _normalize_for_rules(text: str) -> str:
-    normalized = _strip_accents((text or "").lower().strip())
+    normalized = strip_accents((text or "").lower().strip())
     normalized = _NON_WORD_RE.sub(" ", normalized)
     normalized = _SPACES_RE.sub(" ", normalized).strip()
     return normalized
 
-
-def _capitalize_first(value: str) -> str:
-    text = (value or "").strip()
-    if not text:
-        return text
-    return text[:1].upper() + text[1:]
 
 
 def _determine_pix_direction(
@@ -155,7 +126,7 @@ def _extract_name(description: str) -> str:
 
 
 def _guess_category(normalized_description: str) -> str:
-    d = _strip_accents(normalized_description).upper()
+    d = strip_accents(normalized_description).upper()
 
     if "INVESTIMENTO" in d:
         return "investimentos"
@@ -179,7 +150,7 @@ def _guess_category(normalized_description: str) -> str:
 
 
 def _guess_payer(normalized_description: str) -> str:
-    d = _strip_accents(normalized_description).upper()
+    d = strip_accents(normalized_description).upper()
     parent_hints = ["ALUGUEL", "FACULDADE", "SPOTIFY", "NETFLIX", "MERCADO"]
     if any(k in d for k in parent_hints):
         return "pais"
@@ -234,7 +205,7 @@ def sugerir_descricao_com_ia(transacao: dict) -> tuple[str | None, str | None]:
         _IA_CACHE[cache_key] = (None, None)
         return None, None
 
-    descricao = _capitalize_first(str(result.get("descricao") or "").strip()) or None
+    descricao = capitalize_first(str(result.get("descricao") or "").strip()) or None
     categoria = str(result.get("categoria") or "").strip().lower() or None
     _IA_CACHE[cache_key] = (descricao, categoria)
     return descricao, categoria
@@ -312,7 +283,7 @@ def processar_descricao(transacao: dict) -> DescricaoProcessada:
         custom_description, custom_category, _priority = custom
         return DescricaoProcessada(
             descricao_normalizada=descricao_normalizada,
-            descricao_final=_capitalize_first(custom_description or raw_description or "Transação"),
+            descricao_final=capitalize_first(custom_description or raw_description or "Transação"),
             categoria=custom_category,
             ignore=False,
             matched_rule=True,
@@ -340,7 +311,7 @@ def processar_descricao(transacao: dict) -> DescricaoProcessada:
             matched_rule=True,
         )
 
-    fallback_description = _capitalize_first(raw_description or "Transação")
+    fallback_description = capitalize_first(raw_description or "Transação")
     return DescricaoProcessada(
         descricao_normalizada=descricao_normalizada,
         descricao_final=fallback_description,
@@ -372,7 +343,7 @@ def enhance_transaction(
     if processed.ignore:
         return None
 
-    descricao_final = _capitalize_first((processed.descricao_final or "").strip() or (raw_description or "").strip())
+    descricao_final = capitalize_first((processed.descricao_final or "").strip() or (raw_description or "").strip())
     descricao_final_normalizada = normalize_description(descricao_final) or processed.descricao_normalizada
 
     # Determinístico: regra explícita.
@@ -393,7 +364,7 @@ def enhance_transaction(
     if pattern is not None:
         learned_category = _sanitize_category(pattern.get("categoria"))
         learned_payer = _sanitize_payer(pattern.get("pagador"))
-        learned_description = _capitalize_first(
+        learned_description = capitalize_first(
             (pattern.get("descricao_editada_usuario") or "").strip() or descricao_final
         )
         usage = int(pattern.get("contador_uso") or 1)
@@ -416,7 +387,7 @@ def enhance_transaction(
         }
     )
     if ia_description is not None or ia_category is not None:
-        final_description = _capitalize_first(ia_description or descricao_final)
+        final_description = capitalize_first(ia_description or descricao_final)
         final_normalized = normalize_description(final_description) or descricao_final_normalizada
         category = _sanitize_category(ia_category or _guess_category(final_normalized))
         payer = _sanitize_payer(_guess_payer(final_normalized))

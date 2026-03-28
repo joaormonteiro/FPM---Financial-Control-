@@ -7,19 +7,7 @@ from typing import Any
 
 import requests
 
-ALLOWED_CATEGORIES = {
-    "alimentacao",
-    "lazer",
-    "transporte",
-    "educacao",
-    "moradia",
-    "assinaturas",
-    "saude",
-    "investimentos",
-    "entrada",
-    "outros",
-}
-ALLOWED_PAYERS = {"eu", "pais"}
+from core.models import ALLOWED_CATEGORIES, ALLOWED_PAYERS
 
 _JSON_BLOCK_RE = re.compile(r"\{[\s\S]*\}")
 _DEFAULT_MODEL = "gemini-1.5-flash"

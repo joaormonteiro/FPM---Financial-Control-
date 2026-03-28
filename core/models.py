@@ -13,7 +13,7 @@ ALLOWED_CLASSIFICATION_SOURCES = {
     "fallback",
 }
 
-ALLOWED_CATEGORIES = [
+ALLOWED_CATEGORIES = {
     "alimentacao",
     "lazer",
     "transporte",
@@ -24,12 +24,16 @@ ALLOWED_CATEGORIES = [
     "investimentos",
     "entrada",
     "outros",
-]
+}
 
-ALLOWED_PAYERS = [
-    "eu",
-    "pais",
-]
+ALLOWED_PAYERS = {"eu", "pais"}
+
+
+def capitalize_first(value: str | None) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return text
+    return text[:1].upper() + text[1:]
 
 
 @dataclass
