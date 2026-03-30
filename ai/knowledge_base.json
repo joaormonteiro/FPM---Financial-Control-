@@ -1,69 +1,233 @@
 {
-  "people": {
-    "gustavo silva de oliveira": {
-      "aliases": ["gustavo silva", "guti"],
-      "conditional_rules": [
-        {
-          "max_amount": 10,
-          "description": "Carona para a faculdade",
-          "category": "Transporte",
-          "payer": "Pais"
-        },
-        {
-          "description": "Pix pro Guti",
-          "category": "Outros",
-          "payer": "João"
-        }
-      ]
+  "_comment": "Generic rules only. NO personal names, NO personal amounts, NO individual data.",
+  "rules": [
+    {
+      "keywords": ["cdb", "rendimento cdb", "aplicacao cdb"],
+      "category": "investimentos",
+      "description": "Investimento CDB",
+      "confidence": 1.0
     },
-
-    "pietro henrique araujo": {
-      "aliases": ["pietro henrique"],
-      "description": "Carona para a faculdade",
-      "category": "Transporte",
-      "payer": "Pais"
+    {
+      "keywords": ["porquinho"],
+      "category": "investimentos",
+      "description": "Poupança Inter",
+      "confidence": 1.0
     },
-
-    "lucas jaques de oliveira": {
-      "aliases": ["lucas jaques"],
-      "description": "Carona para a faculdade",
-      "category": "Transporte",
-      "payer": "Pais"
+    {
+      "keywords": ["tesouro direto"],
+      "category": "investimentos",
+      "description": "Tesouro Direto",
+      "confidence": 1.0
     },
-
-    "alana cristine dos santos": {
-      "aliases": ["alana cristine"],
-      "description": "Carona para a faculdade",
-      "category": "Transporte",
-      "payer": "Pais"
+    {
+      "keywords": ["salario", "salário"],
+      "category": "entrada",
+      "description": "Salário",
+      "confidence": 1.0
     },
-
-    "marina miranda capeli": {
-      "aliases": ["marina miranda"],
-      "description": "Carona para a faculdade",
-      "category": "Transporte",
-      "payer": "Pais"
+    {
+      "keywords": ["ifood"],
+      "category": "alimentacao",
+      "description": "iFood",
+      "confidence": 1.0
     },
-
-    "rubens antunes monteiro": {
-      "aliases": ["rubens antunes"],
-      "description": "Rubens Antunes Monteiro",
-      "category": "Outros",
-      "payer": "João"
+    {
+      "keywords": ["rappi"],
+      "category": "alimentacao",
+      "description": "Rappi",
+      "confidence": 1.0
     },
-
-    "lucas gabriel de araujo": {
-      "aliases": ["lucas gabriel"],
-      "description": "Lucas Rezende",
-      "category": "Outros",
-      "payer": "João"
+    {
+      "keywords": ["uber eats"],
+      "category": "alimentacao",
+      "description": "Uber Eats",
+      "confidence": 1.0
     },
-
-    "rita de cassia geara guedes": {
-      "aliases": ["rita de cassia"],
-      "description": "Terapia",
-      "category": "Saúde",
-      "payer": "João"
+    {
+      "keywords": ["mcdonalds", "mc donalds", "mcdonald"],
+      "category": "alimentacao",
+      "description": "McDonald's",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["burger king"],
+      "category": "alimentacao",
+      "description": "Burger King",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["subway"],
+      "category": "alimentacao",
+      "description": "Subway",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["pao de acucar", "pao de açúcar"],
+      "category": "alimentacao",
+      "description": "Pão de Açúcar",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["carrefour"],
+      "category": "alimentacao",
+      "description": "Carrefour",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["atacadao", "atacadão"],
+      "category": "alimentacao",
+      "description": "Atacadão",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["assai", "assaí"],
+      "category": "alimentacao",
+      "description": "Assaí",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["extra supermercado"],
+      "category": "alimentacao",
+      "description": "Extra",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["spotify"],
+      "category": "assinaturas",
+      "description": "Spotify",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["netflix"],
+      "category": "assinaturas",
+      "description": "Netflix",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["amazon prime"],
+      "category": "assinaturas",
+      "description": "Amazon Prime",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["disney plus", "disney+"],
+      "category": "assinaturas",
+      "description": "Disney+",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["hbo max", "max streaming"],
+      "category": "assinaturas",
+      "description": "HBO Max",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["youtube premium"],
+      "category": "assinaturas",
+      "description": "YouTube Premium",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["deezer"],
+      "category": "assinaturas",
+      "description": "Deezer",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["alura"],
+      "category": "educacao",
+      "description": "Alura",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["udemy"],
+      "category": "educacao",
+      "description": "Udemy",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["coursera"],
+      "category": "educacao",
+      "description": "Coursera",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["duo lingo", "duolingo"],
+      "category": "educacao",
+      "description": "Duolingo",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["sem parar"],
+      "category": "transporte",
+      "description": "Sem Parar (pedágio)",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["autopass"],
+      "category": "transporte",
+      "description": "AutoPass",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["99app", "99 app"],
+      "category": "transporte",
+      "description": "99",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["99*trip", "99 trip", "99app", "99taxi", "99 app"],
+      "category": "transporte",
+      "description": "99",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["cabify"],
+      "category": "transporte",
+      "description": "Cabify",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["enel"],
+      "category": "moradia",
+      "description": "Enel (energia)",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["sabesp"],
+      "category": "moradia",
+      "description": "SABESP (água)",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["comgas", "comgás"],
+      "category": "moradia",
+      "description": "Comgás",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["steam"],
+      "category": "lazer",
+      "description": "Steam",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["playstation store", "psn"],
+      "category": "lazer",
+      "description": "PlayStation Store",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["xbox"],
+      "category": "lazer",
+      "description": "Xbox",
+      "confidence": 1.0
+    },
+    {
+      "keywords": ["airbnb"],
+      "category": "lazer",
+      "description": "Airbnb",
+      "confidence": 1.0
     }
-  }
+  ]
 }

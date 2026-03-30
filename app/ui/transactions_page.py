@@ -1,10 +1,22 @@
+"""
+Transactions page with a clean, artifact-free QComboBox category delegate.
+
+Key delegate fixes:
+  • updateEditorGeometry properly fills the cell rect
+  • setFrame(False) removes border artifacts
+  • paint() uses initStyleOption so text renders cleanly in all states
+  • Category change is committed immediately on selection
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtCore import QDate, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -17,29 +29,62 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QStyle,
 )
 
 from app.controllers.transaction_controller import TransactionController
-from core.models import ALLOWED_PAYERS, capitalize_first
+from core.models import ALLOWED_CATEGORIES, ALLOWED_PAYERS, capitalize_first
 
+# ---------------------------------------------------------------------------
+# Category options – keep in sync with ALLOWED_CATEGORIES
+# ---------------------------------------------------------------------------
 CATEGORY_OPTIONS: list[tuple[str, str]] = [
     ("alimentacao", "Alimentação"),
-    ("transporte", "Transporte"),
-    ("lazer", "Lazer"),
     ("assinaturas", "Assinaturas"),
-    ("saude", "Saúde"),
-    ("investimentos", "Investimentos"),
+    ("educacao", "Educação"),
     ("entrada", "Entrada"),
+    ("investimentos", "Investimentos"),
+    ("lazer", "Lazer"),
+    ("moradia", "Moradia"),
     ("outros", "Outros"),
+    ("saude", "Saúde"),
+    ("transporte", "Transporte"),
 ]
-CATEGORY_KEYS = {key for key, _ in CATEGORY_OPTIONS}
+
+CATEGORY_KEYS: set[str] = {k for k, _ in CATEGORY_OPTIONS}
+
+# Subtle background tints per category
+_CATEGORY_TINT: dict[str, str] = {
+    "alimentacao": "#fff8e1",
+    "assinaturas": "#e8eaf6",
+    "educacao": "#e3f2fd",
+    "entrada": "#e8f5e9",
+    "investimentos": "#f3e5f5",
+    "lazer": "#fce4ec",
+    "moradia": "#e0f7fa",
+    "outros": "#ffffff",
+    "saude": "#fff3e0",
+    "transporte": "#f1f8e9",
+}
+
+# Table column indices
+_COL_DATE = 0
+_COL_DESC = 1
+_COL_CATEGORY = 2
+_COL_PAYER = 3
+_COL_AMOUNT = 4
+_COL_SOURCE = 5
+_COL_CONFIDENCE = 6
+_COL_NOTE = 7
+_COL_RECURRING = 8
 
 
-def _category_key_to_label(value: str) -> str:
+def _key_to_label(value: str) -> str:
     key = (value or "").strip().lower()
     for cat_key, label in CATEGORY_OPTIONS:
         if cat_key == key:
@@ -47,7 +92,7 @@ def _category_key_to_label(value: str) -> str:
     return "Outros"
 
 
-def _label_to_category_key(value: str) -> str | None:
+def _label_to_key(value: str) -> str | None:
     text = (value or "").strip().lower()
     for cat_key, label in CATEGORY_OPTIONS:
         if text == label.lower():
@@ -57,28 +102,83 @@ def _label_to_category_key(value: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# ComboBox delegate
+# ---------------------------------------------------------------------------
+
 class CategoryDelegate(QStyledItemDelegate):
-    def createEditor(self, parent, option, index):
-        editor = QComboBox(parent)
+    """
+    Inline ComboBox editor for the category column.
+
+    Fixes:
+    - updateEditorGeometry fills the full cell rect (no offset artifacts)
+    - setFrame(False) removes the extra border
+    - paint() renders the display text cleanly in all states
+    - currentIndexChanged triggers immediate commitData
+    """
+
+    def createEditor(
+        self,
+        parent: QWidget,
+        option: QStyleOptionViewItem,
+        index: QModelIndex,
+    ) -> QComboBox:
+        combo = QComboBox(parent)
+        combo.setFrame(False)
         for _, label in CATEGORY_OPTIONS:
-            editor.addItem(label)
-        return editor
+            combo.addItem(label)
+        # Commit immediately when the user picks an item
+        combo.currentIndexChanged.connect(
+            lambda _: self.commitData.emit(combo)  # type: ignore[attr-defined]
+        )
+        return combo
 
-    def setEditorData(self, editor, index):
-        current_label = str(index.data() or "").strip()
-        selected = current_label if current_label else "Outros"
-        pos = editor.findText(selected)
-        if pos < 0:
-            pos = editor.findText(_category_key_to_label(current_label))
-        if pos < 0:
-            pos = editor.findText("Outros")
-        editor.setCurrentIndex(max(pos, 0))
+    def setEditorData(self, editor: QComboBox, index: QModelIndex) -> None:
+        current = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        idx = editor.findText(current)
+        if idx < 0:
+            idx = editor.findText(_key_to_label(current))
+        editor.setCurrentIndex(max(idx, 0))
 
-    def setModelData(self, editor, model, index):
-        model.setData(index, editor.currentText())
+    def setModelData(
+        self,
+        editor: QComboBox,
+        model: object,
+        index: QModelIndex,
+    ) -> None:
+        from PySide6.QtCore import Qt as _Qt
 
+        getattr(model, "setData")(index, editor.currentText(), _Qt.ItemDataRole.EditRole)
+
+    def updateEditorGeometry(
+        self,
+        editor: QWidget,
+        option: QStyleOptionViewItem,
+        index: QModelIndex,
+    ) -> None:
+        editor.setGeometry(option.rect)
+
+    def paint(
+        self,
+        painter: object,
+        option: QStyleOptionViewItem,
+        index: QModelIndex,
+    ) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        QApplication.style().drawControl(
+            QStyle.ControlElement.CE_ItemViewItem, opt, painter  # type: ignore[arg-type]
+        )
+
+
+# ---------------------------------------------------------------------------
+# Transactions page
+# ---------------------------------------------------------------------------
 
 class TransactionsPage(QWidget):
+    """Main transactions view with inline category editing."""
+
     data_changed = Signal()
 
     def __init__(self) -> None:
@@ -94,6 +194,7 @@ class TransactionsPage(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(10)
 
+        # Header
         header = QHBoxLayout()
         title = QLabel("Transações")
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
@@ -103,22 +204,26 @@ class TransactionsPage(QWidget):
         header.addWidget(self.refresh_button)
         root.addLayout(header)
 
+        # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels(
-            ["Data", "Descrição", "Categoria", "Pagador", "Valor", "Observação", "Recorrente"]
+            ["Data", "Descrição", "Categoria", "Pagador", "Valor",
+             "Origem", "Confiança", "Observação", "Recorrente"]
         )
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(
-            QTableWidget.EditTrigger.DoubleClicked
-            | QTableWidget.EditTrigger.SelectedClicked
-            | QTableWidget.EditTrigger.EditKeyPressed
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.SelectedClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
         )
         self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
-        self.table.setItemDelegateForColumn(2, CategoryDelegate(self.table))
+        self.table.setAlternatingRowColors(False)  # we paint our own tints
+        self.table.setItemDelegateForColumn(_COL_CATEGORY, CategoryDelegate(self.table))
+        self.table.itemChanged.connect(self._on_item_changed)
         root.addWidget(self.table, stretch=1)
 
+        # Save button
         actions = QHBoxLayout()
         self.save_button = QPushButton("Salvar alterações")
         self.save_button.setStyleSheet("font-weight: 600;")
@@ -126,25 +231,28 @@ class TransactionsPage(QWidget):
         actions.addWidget(self.save_button)
         root.addLayout(actions)
 
+        # Recurrence
         recurring_box = QGroupBox("Recorrência")
         recurring_layout = QHBoxLayout(recurring_box)
         self.recurrence_group_input = QLineEdit()
         self.recurrence_group_input.setPlaceholderText(
-            "Grupo de recorrência (opcional, ex: manual_123)"
+            "Grupo de recorrência (ex: netflix_mensal)"
         )
         self.mark_recurring_button = QPushButton("Marcar selecionada como recorrente")
         recurring_layout.addWidget(self.recurrence_group_input, stretch=1)
         recurring_layout.addWidget(self.mark_recurring_button)
         root.addWidget(recurring_box)
 
+        # Manual entry
         manual_box = QGroupBox("Lançamento Manual")
         manual_layout = QGridLayout(manual_box)
         self.manual_date = QDateEdit()
         self.manual_date.setCalendarPopup(True)
         self.manual_date.setDate(QDate.currentDate())
         self.manual_description = QLineEdit()
+        self.manual_description.setPlaceholderText("Descrição")
         self.manual_amount = QDoubleSpinBox()
-        self.manual_amount.setRange(-999999999.99, 999999999.99)
+        self.manual_amount.setRange(-999_999_999.99, 999_999_999.99)
         self.manual_amount.setDecimals(2)
         self.manual_amount.setSingleStep(1.0)
         self.manual_category = QComboBox()
@@ -168,140 +276,163 @@ class TransactionsPage(QWidget):
         self.status_label = QLabel("")
         root.addWidget(self.status_label)
 
+        # Connections
         self.refresh_button.clicked.connect(self.refresh)
         self.save_button.clicked.connect(self._save_selected_row)
         self.mark_recurring_button.clicked.connect(self._mark_selected_recurring)
         self.manual_add_button.clicked.connect(self._add_manual_transaction)
 
     def refresh(self) -> None:
+        """Reload transactions from the database."""
         self._rows = self.controller.list_transactions()
         self._populate_table()
 
     def _populate_table(self) -> None:
         self._is_loading = True
+        self.table.blockSignals(True)
         self.table.setRowCount(len(self._rows))
 
         for row_idx, tx in enumerate(self._rows):
-            date_text = self._format_date(str(tx.get("date") or ""))
+            date_text = self._fmt_date(str(tx.get("date") or ""))
             description = capitalize_first(str(tx.get("description") or ""))
-            raw_description = str(tx.get("raw_description") or "")
-            category = _category_key_to_label(str(tx.get("category") or "outros"))
+            raw_desc = str(tx.get("raw_description") or "")
+            category_label = _key_to_label(str(tx.get("category") or "outros"))
             payer = str(tx.get("payer") or "")
             amount = float(tx.get("amount") or 0.0)
+            source = str(tx.get("classification_source") or "")
+            confidence = float(tx.get("confidence") or 0.0)
             note = str(tx.get("note") or "")
             is_recurring = bool(tx.get("is_recurring"))
+            cat_key = str(tx.get("category") or "outros")
 
             date_item = QTableWidgetItem(date_text)
             desc_item = QTableWidgetItem(description)
-            if raw_description:
-                desc_item.setToolTip(f"(orig: {raw_description})")
-            category_item = QTableWidgetItem(category)
+            if raw_desc and raw_desc != description:
+                desc_item.setToolTip(f"Original: {raw_desc}")
+            category_item = QTableWidgetItem(category_label)
             payer_item = QTableWidgetItem(payer)
-            amount_item = QTableWidgetItem(f"{amount:.2f}")
+            amount_item = QTableWidgetItem(f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            source_item = QTableWidgetItem(source)
+            confidence_item = QTableWidgetItem(f"{confidence:.0%}")
             note_item = QTableWidgetItem(note)
-            recurring_item = QTableWidgetItem("Sim" if is_recurring else "Não")
+            recurring_item = QTableWidgetItem("✓" if is_recurring else "")
 
-            date_item.setFlags(date_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            recurring_item.setFlags(recurring_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            # Non-editable columns
+            for item in (date_item, source_item, confidence_item, recurring_item):
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
             amount_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            if amount < 0:
-                amount_item.setBackground(QColor("#ffd6d6"))
-                amount_item.setForeground(QColor("#8a1f11"))
-            else:
-                amount_item.setBackground(QColor("#d6ffd6"))
-                amount_item.setForeground(QColor("#136f1f"))
 
-            self.table.setItem(row_idx, 0, date_item)
-            self.table.setItem(row_idx, 1, desc_item)
-            self.table.setItem(row_idx, 2, category_item)
-            self.table.setItem(row_idx, 3, payer_item)
-            self.table.setItem(row_idx, 4, amount_item)
-            self.table.setItem(row_idx, 5, note_item)
-            self.table.setItem(row_idx, 6, recurring_item)
+            # Amount colour
+            if amount < 0:
+                amount_item.setForeground(QColor("#b71c1c"))
+            else:
+                amount_item.setForeground(QColor("#1b5e20"))
+
+            # Row tint by category
+            tint = QColor(_CATEGORY_TINT.get(cat_key, "#ffffff"))
+            for item in (date_item, desc_item, category_item, payer_item,
+                         amount_item, source_item, confidence_item, note_item, recurring_item):
+                item.setBackground(tint)
+
+            self.table.setItem(row_idx, _COL_DATE, date_item)
+            self.table.setItem(row_idx, _COL_DESC, desc_item)
+            self.table.setItem(row_idx, _COL_CATEGORY, category_item)
+            self.table.setItem(row_idx, _COL_PAYER, payer_item)
+            self.table.setItem(row_idx, _COL_AMOUNT, amount_item)
+            self.table.setItem(row_idx, _COL_SOURCE, source_item)
+            self.table.setItem(row_idx, _COL_CONFIDENCE, confidence_item)
+            self.table.setItem(row_idx, _COL_NOTE, note_item)
+            self.table.setItem(row_idx, _COL_RECURRING, recurring_item)
 
         self.table.resizeColumnsToContents()
+        self.table.blockSignals(False)
         self._is_loading = False
         self._set_status(f"{len(self._rows)} transações carregadas.", success=True)
+
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        """Auto-save when the category ComboBox delegate commits a change."""
+        if self._is_loading:
+            return
+        if item.column() == _COL_CATEGORY:
+            self._save_row(item.row())
 
     def _save_selected_row(self) -> None:
         row_idx = self.table.currentRow()
         if row_idx < 0 or row_idx >= len(self._rows):
             QMessageBox.warning(self, "Transações", "Selecione uma transação na tabela.")
             return
+        self._save_row(row_idx)
+
+    def _save_row(self, row_idx: int) -> None:
+        if row_idx < 0 or row_idx >= len(self._rows):
+            return
 
         tx = self._rows[row_idx]
         tx_id = int(tx["id"])
 
-        description_item = self.table.item(row_idx, 1)
-        category_item = self.table.item(row_idx, 2)
-        payer_item = self.table.item(row_idx, 3)
-        amount_item = self.table.item(row_idx, 4)
-        note_item = self.table.item(row_idx, 5)
-        if not all([description_item, category_item, payer_item, amount_item, note_item]):
-            self._set_status("Linha selecionada está incompleta para salvar.", success=False)
+        desc_item = self.table.item(row_idx, _COL_DESC)
+        cat_item = self.table.item(row_idx, _COL_CATEGORY)
+        payer_item = self.table.item(row_idx, _COL_PAYER)
+        amount_item = self.table.item(row_idx, _COL_AMOUNT)
+        note_item = self.table.item(row_idx, _COL_NOTE)
+
+        if not all([desc_item, cat_item, payer_item, amount_item, note_item]):
+            self._set_status("Linha incompleta — não foi possível salvar.", success=False)
             return
 
-        new_description = capitalize_first(description_item.text().strip())
-        new_category = _label_to_category_key(category_item.text().strip())
-        new_payer = payer_item.text().strip().lower()
-        amount_text = amount_item.text().strip()
-        new_note = note_item.text().strip()
+        new_desc = capitalize_first((desc_item.text() or "").strip())
+        new_cat = _label_to_key((cat_item.text() or "").strip())
+        new_payer = (payer_item.text() or "").strip().lower()
+        note = (note_item.text() or "").strip()
 
-        if not new_description:
+        if not new_desc:
             self._set_status("Descrição não pode ficar vazia.", success=False)
             return
-
-        if not new_category:
-            self._set_status("Selecione uma categoria válida.", success=False)
+        if not new_cat or new_cat not in CATEGORY_KEYS:
+            self._set_status("Categoria inválida.", success=False)
             return
-
-        if new_category not in CATEGORY_KEYS:
-            self._set_status("Categoria inválida selecionada.", success=False)
-            return
-
         if new_payer and new_payer not in ALLOWED_PAYERS:
-            allowed = ", ".join(ALLOWED_PAYERS)
-            self._set_status(f"Pagador inválido. Use vazio ou: {allowed}", success=False)
+            self._set_status(f"Pagador inválido. Use: {', '.join(ALLOWED_PAYERS)}", success=False)
             return
 
         try:
-            new_amount = self._parse_amount(amount_text)
+            new_amount = self._parse_amount(amount_item.text())
         except ValueError:
-            self._set_status("Valor inválido. Use número como 123.45 ou -54,90.", success=False)
+            self._set_status("Valor inválido.", success=False)
             return
 
         try:
             self.controller.update_transaction(
                 tx_id=tx_id,
-                description=new_description,
-                category=new_category,
+                description=new_desc,
+                category=new_cat,
                 payer=new_payer or None,
                 amount=new_amount,
-                note=new_note or None,
+                note=note or None,
             )
-            self._set_status(f"Transação {tx_id} atualizada e aprendida.", success=True)
+            self._set_status(f"Transação {tx_id} salva.", success=True)
             self.refresh()
             self.data_changed.emit()
         except Exception as exc:
-            self._set_status(f"Erro ao atualizar transação {tx_id}: {exc}", success=False)
+            self._set_status(f"Erro ao salvar: {exc}", success=False)
 
     def _mark_selected_recurring(self) -> None:
         row_idx = self.table.currentRow()
         if row_idx < 0 or row_idx >= len(self._rows):
-            QMessageBox.warning(self, "Transações", "Selecione uma transação na tabela.")
+            QMessageBox.warning(self, "Transações", "Selecione uma transação.")
             return
 
         tx = self._rows[row_idx]
         tx_id = int(tx["id"])
-        group_name = self.recurrence_group_input.text().strip() or f"manual_{tx_id}"
-
+        group = self.recurrence_group_input.text().strip() or f"manual_{tx_id}"
         try:
-            self.controller.mark_recurring(tx_id=tx_id, group_name=group_name)
+            self.controller.mark_recurring(tx_id=tx_id, group_name=group)
             self._set_status(f"Transação {tx_id} marcada como recorrente.", success=True)
             self.refresh()
             self.data_changed.emit()
         except Exception as exc:
-            self._set_status(f"Erro ao marcar recorrência: {exc}", success=False)
+            self._set_status(f"Erro: {exc}", success=False)
 
     def _add_manual_transaction(self) -> None:
         qdate = self.manual_date.date()
@@ -309,7 +440,7 @@ class TransactionsPage(QWidget):
         description = capitalize_first(self.manual_description.text())
         amount = float(self.manual_amount.value())
         selected_label = self.manual_category.currentText()
-        category = _label_to_category_key(selected_label) or "outros"
+        category = _label_to_key(selected_label) or "outros"
         is_recurring = self.manual_recurring.isChecked()
 
         ok, message = self.controller.add_manual_transaction(
@@ -329,27 +460,24 @@ class TransactionsPage(QWidget):
             self.data_changed.emit()
 
     def _set_status(self, message: str, success: bool) -> None:
-        color = "#136f1f" if success else "#8a1f11"
+        color = "#1b5e20" if success else "#b71c1c"
         self.status_label.setStyleSheet(f"color: {color}; font-weight: 600;")
         self.status_label.setText(message)
 
     @staticmethod
     def _parse_amount(text: str) -> float:
-        cleaned = (text or "").strip()
-        if not cleaned:
-            raise ValueError("valor vazio")
-        cleaned = cleaned.replace("R$", "").replace(" ", "")
+        cleaned = (text or "").strip().replace("R$", "").replace(" ", "")
         if "," in cleaned and "." in cleaned:
             cleaned = cleaned.replace(".", "").replace(",", ".")
         elif "," in cleaned:
             cleaned = cleaned.replace(",", ".")
+        if not cleaned:
+            raise ValueError("empty amount")
         return float(cleaned)
 
     @staticmethod
-    def _format_date(date_text: str) -> str:
+    def _fmt_date(date_text: str) -> str:
         try:
-            dt = datetime.strptime(date_text[:10], "%Y-%m-%d")
-            return dt.strftime("%d/%m/%Y")
+            return datetime.strptime(date_text[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
         except Exception:
             return date_text
-
